@@ -1,0 +1,12 @@
+{
+  "name": "@wholesale-ai/typescript-config",
+  "version": "0.1.0",
+  "description": "Shared TypeScript configurations",
+  "private": true,
+  "main": "index.js",
+  "files": [
+    "base.json",
+    "nextjs.json",
+    "node.json"
+  ]
+}

@@ -1,8 +1,22 @@
-# Wholesale AI - Real-time Negotiation Copilot
+# Wholesale AI - Negotiation Copilot
 
-A real-time AI-powered negotiation copilot for real estate wholesalers using Next.js 16, Socket.io, Deepgram transcription, and OpenAI analysis.
+Real-time AI-powered negotiation assistance for wholesale buyers, built with Next.js 16 and Socket.io in a Turborepo monorepo.
 
-## Features
+## 🏗️ Project Structure
+
+```
+wholesale-ai-negotiation-copilot/
+├── apps/
+│   ├── web/          # Next.js 16 frontend (port 3000)
+│   └── server/       # Socket.io server (port 3001)
+├── packages/
+│   ├── shared/       # Shared types and utilities
+│   ├── typescript-config/  # Shared TypeScript configs
+│   └── eslint-config/      # Shared ESLint configs
+└── ...
+```
+
+## ✨ Features
 
 ✅ **Real-time Transcription** - Live speech-to-text with speaker identification
 ✅ **AI Analysis Engine** - OpenAI-powered conversation analysis and strategic insights  
@@ -12,51 +26,41 @@ A real-time AI-powered negotiation copilot for real estate wholesalers using Nex
 ✅ **Demo Mode** - Simulated conversation for testing and training
 ✅ **Text Simulation** - Manual text input for development and testing
 
-## Tech Stack
+## 🛠️ Tech Stack
 
-- **Frontend**: Next.js 16, React 19, TypeScript
-- **Backend**: Custom Node.js server with Socket.io
-- **AI Services**: OpenAI GPT-4o-mini with structured output
-- **Transcription**: Deepgram real-time streaming (ready for integration)
-- **Testing**: Vitest with comprehensive test coverage
-- **Deployment**: Railway
+- **Frontend**: Next.js 16, React 19, Tailwind CSS, Socket.io Client
+- **Backend**: Node.js, Socket.io, TypeScript
+- **AI**: OpenAI GPT-4o-mini, Deepgram (optional)
+- **Build**: Turborepo, pnpm workspaces
+- **Deploy**: Railway
 
-## Setup Instructions
+## 🚀 Quick Start
 
-### 1. Environment Variables
+1. **Install dependencies**
+   ```bash
+   pnpm install
+   ```
 
-Create a `.env.local` file:
+2. **Set up environment**
+   ```bash
+   cp .env.example .env.local
+   # Edit .env.local with your API keys
+   ```
 
-```bash
-# Required for AI analysis
-OPENAI_API_KEY=sk-your-openai-api-key-here
+3. **Start development servers**
+   ```bash
+   # Start both apps in parallel
+   pnpm dev
+   
+   # Or start individually
+   pnpm dev:web     # Next.js app on :3000
+   pnpm dev:server  # Socket.io server on :3001
+   ```
 
-# Optional - for real phone call transcription
-DEEPGRAM_API_KEY=your-deepgram-api-key-here
-
-# Optional - for live phone calls
-TWILIO_ACCOUNT_SID=your-twilio-account-sid
-TWILIO_AUTH_TOKEN=your-twilio-auth-token
-TWILIO_PHONE_NUMBER=+1234567890
-
-# Server config
-PORT=3000
-NODE_ENV=development
-```
-
-### 2. Install Dependencies
-
-```bash
-npm install
-```
-
-### 3. Run Development Server
-
-```bash
-npm run dev
-```
-
-Open [http://localhost:3000/call](http://localhost:3000/call) to access the call interface.
+4. **Open your browser**
+   - Frontend: http://localhost:3000
+   - Call interface: http://localhost:3000/call
+   - Test page: http://localhost:3000/test
 
 ### 4. Run Tests
 

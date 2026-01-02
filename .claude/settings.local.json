@@ -1,13 +1,23 @@
 {
   "permissions": {
     "allow": [
-      "Bash(npm test)",
-      "Bash(npm install)",
-      "Bash(npm run typecheck:*)",
-      "Bash(npm run dev:*)",
-      "Bash(npm test:*)",
-      "Bash(npm install:*)",
-      "Bash(npx tsc:*)"
+      "Bash(pnpm test)",
+      "Bash(pnpm run typecheck:*)",
+      "Bash(pnpm run dev:*)",
+      "Bash(pnpm test:*)",
+      "Bash(pnpm install:*)",
+      "Bash(npx tsc:*)",
+      "Bash(mkdir:*)",
+      "Bash(pnpm install:*)",
+      "Bash(pnpm dev:server:*)",
+      "Bash(pnpm dev:web:*)",
+      "Bash(rm:*)",
+      "Bash(pnpm add:*)",
+      "Bash(npx @biomejs/biome migrate:*)",
+      "Bash(biome check:*)",
+      "Bash(pnpm turbo run:*)",
+      "Bash(pnpm lint:fix:*)",
+      "Bash(pnpm lint:*)"
     ],
     "deny": [],
     "ask": []

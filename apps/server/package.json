@@ -1,0 +1,34 @@
+{
+  "name": "@wholesale-ai/server",
+  "version": "0.1.0",
+  "description": "Socket.io server for wholesale AI negotiation copilot",
+  "private": true,
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch server.ts",
+    "start": "node dist/server.js",
+    "lint": "biome check .",
+    "format": "biome format --write .",
+    "check": "biome check --write .",
+    "typecheck": "tsc --noEmit",
+    "clean": "rimraf dist"
+  },
+  "dependencies": {
+    "@wholesale-ai/shared": "workspace:*",
+    "socket.io": "^4.8.1",
+    "cors": "^2.8.5",
+    "@deepgram/sdk": "^3.7.0",
+    "@anthropic-ai/sdk": "^0.32.1",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@wholesale-ai/typescript-config": "workspace:*",
+    "@types/cors": "^2.8.17",
+    "@types/node": "^22.10.2",
+    "rimraf": "^6.0.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

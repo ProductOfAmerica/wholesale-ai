@@ -5,39 +5,30 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "node server.js",
-    "build": "next build",
-    "start": "NODE_ENV=production node server.js",
-    "test": "vitest",
-    "test:watch": "vitest --watch",
-    "lint": "next lint",
-    "typecheck": "tsc --noEmit"
-  },
-  "dependencies": {
-    "@deepgram/sdk": "^3.9.0",
-    "next": "^16.1.0",
-    "openai": "^6.1.0",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "socket.io": "^4.8.1",
-    "socket.io-client": "^4.8.1",
-    "zod": "^4.3.4"
+    "build": "turbo run build",
+    "dev": "turbo run dev --parallel",
+    "dev:web": "turbo run dev --filter=@wholesale-ai/web",
+    "dev:server": "turbo run dev --filter=@wholesale-ai/server",
+    "lint": "biome check .",
+    "lint:fix": "biome check . --write",
+    "test": "turbo run test",
+    "typecheck": "turbo run typecheck",
+    "clean": "turbo run clean"
   },
   "devDependencies": {
-    "@testing-library/jest-dom": "^6.6.3",
-    "@testing-library/react": "^16.1.0",
-    "@testing-library/user-event": "^14.5.2",
+    "@biomejs/biome": "^2.3.10",
     "@types/node": "^22.10.2",
-    "@types/react": "^19.0.2",
-    "@types/react-dom": "^19.0.2",
-    "@vitejs/plugin-react": "^4.3.4",
-    "eslint": "^9.17.0",
-    "eslint-config-next": "^16.1.0",
-    "jsdom": "^26.0.0",
+    "turbo": "^2.3.4",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"
   },
+  "packageManager": "pnpm@9.0.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=18.0.0",
+    "pnpm": ">=9.0.0"
   }
 }
