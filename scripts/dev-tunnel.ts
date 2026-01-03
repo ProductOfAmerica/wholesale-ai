@@ -1,7 +1,5 @@
 import { type ChildProcess, spawn } from 'node:child_process';
 
-const TUNNEL_URL = 'https://wholesale.tarnow.dev';
-
 function startTunnel(): ChildProcess {
   console.log('Starting cloudflare tunnel...');
 
@@ -20,19 +18,14 @@ function startTunnel(): ChildProcess {
 async function main() {
   const tunnelProcess = startTunnel();
 
-  // Give tunnel a moment to connect
   await new Promise((resolve) => setTimeout(resolve, 2000));
 
-  console.log(`\n✓ Tunnel ready: ${TUNNEL_URL}`);
+  console.log('\n✓ Tunnel ready');
   console.log('Starting turbo dev...\n');
 
-  const turbo = spawn('pnpm', ['dev'], {
+  const turbo = spawn('pnpm', ['dev:web'], {
     stdio: 'inherit',
     shell: true,
-    env: {
-      ...process.env,
-      SERVER_URL: TUNNEL_URL,
-    },
   });
 
   const cleanup = () => {

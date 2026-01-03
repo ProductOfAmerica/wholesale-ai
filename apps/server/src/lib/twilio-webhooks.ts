@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { parse as parseUrl } from 'node:url';
 import type { Server as SocketIOServer } from 'socket.io';
+import { generateCallSummary } from './ai-analysis.js';
 import {
   generateAccessToken,
   generateClientTwiML,
@@ -152,10 +153,47 @@ export async function handleVoiceClientWebhook(
   }
 }
 
-export function createTwilioRouter(io: SocketIOServer, serverUrl?: string) {
-  const resolvedServerUrl =
-    serverUrl || process.env.SERVER_URL || 'http://localhost:3001';
+async function handleSummaryRequest(
+  req: IncomingMessage,
+  res: ServerResponse
+): Promise<void> {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204);
+    res.end();
+    return;
+  }
+
+  try {
+    const body = await getRequestBody(req);
+    const { transcript, duration } = JSON.parse(body);
+
+    if (!transcript || !Array.isArray(transcript)) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Missing or invalid transcript' }));
+      return;
+    }
+
+    console.log(`Generating call summary via REST (${transcript.length} entries)`);
+    const summary = await generateCallSummary(transcript, duration || 0);
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(summary));
+  } catch (error) {
+    console.error('Error generating summary:', error);
+    res.writeHead(500, { 'Content-Type': 'application/json' });
+    res.end(
+      JSON.stringify({
+        error: error instanceof Error ? error.message : 'Failed to generate summary',
+      })
+    );
+  }
+}
+
+export function createTwilioRouter(io: SocketIOServer, serverUrl: string) {
   return async (
     req: IncomingMessage,
     res: ServerResponse
@@ -179,12 +217,17 @@ export function createTwilioRouter(io: SocketIOServer, serverUrl?: string) {
     }
 
     if (pathname === '/twilio/voice-client' && req.method === 'POST') {
-      await handleVoiceClientWebhook(req, res, resolvedServerUrl);
+      await handleVoiceClientWebhook(req, res, serverUrl);
       return true;
     }
 
     if (pathname === '/twilio/status' && req.method === 'POST') {
       await handleStatusCallback(req, res, io);
+      return true;
+    }
+
+    if (pathname === '/twilio/summary' && (req.method === 'POST' || req.method === 'OPTIONS')) {
+      await handleSummaryRequest(req, res);
       return true;
     }
 

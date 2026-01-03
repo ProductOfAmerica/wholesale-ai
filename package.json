@@ -6,10 +6,8 @@
   "type": "module",
   "scripts": {
     "build": "turbo run build",
-    "dev": "turbo run dev --parallel",
-    "dev:tunnel": "npx tsx scripts/dev-tunnel.ts",
-    "dev:web": "turbo run dev --filter=@wholesale-ai/web",
-    "dev:server": "turbo run dev --filter=@wholesale-ai/server",
+    "dev": "npx tsx scripts/dev-tunnel.ts",
+    "dev:web": "turbo run dev --parallel",
     "lint": "biome check .",
     "lint:fix": "biome check . --write",
     "test": "turbo run test",

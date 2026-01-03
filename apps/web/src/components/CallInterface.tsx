@@ -166,8 +166,9 @@ export function CallInterface() {
   useEffect(() => {
     async function initDevice() {
       try {
-        const serverUrl =
-          process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3001';
+        const serverUrl = process.env.NEXT_PUBLIC_SOCKET_URL;
+        if (!serverUrl)
+          throw new Error('NEXT_PUBLIC_SOCKET_URL not configured');
         const response = await fetch(`${serverUrl}/twilio/token`);
         if (!response.ok) {
           throw new Error('Failed to fetch token');
@@ -458,19 +459,40 @@ export function CallInterface() {
     [deviceReady]
   );
 
-  const handleEndCall = useCallback(() => {
+  const handleEndCall = useCallback(async () => {
     if (activeCallRef.current) {
       activeCallRef.current.disconnect();
       activeCallRef.current = null;
     }
-    setCallState((prev) => {
-      if (socket && prev.duration > 0) {
-        setSummaryLoading(true);
-        socket.emit('request_call_summary', { duration: prev.duration });
+
+    setCallState((prev) => ({ ...prev, status: 'ended' }));
+
+    if (transcript.length > 0) {
+      setSummaryLoading(true);
+      try {
+        const serverUrl = process.env.NEXT_PUBLIC_SOCKET_URL;
+        const response = await fetch(`${serverUrl}/twilio/summary`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            transcript,
+            duration: callState.duration,
+          }),
+        });
+
+        if (response.ok) {
+          const summary = await response.json();
+          setCallSummary(summary);
+        } else {
+          console.error('Failed to get summary:', await response.text());
+        }
+      } catch (error) {
+        console.error('Error fetching summary:', error);
+      } finally {
+        setSummaryLoading(false);
       }
-      return { ...prev, status: 'ended' };
-    });
-  }, [socket]);
+    }
+  }, [transcript, callState.duration]);
 
   const handleNewCall = useCallback(() => {
     setCallState({

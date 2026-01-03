@@ -1,6 +1,7 @@
 import type { IncomingMessage } from 'node:http';
 import { createServer } from 'node:http';
 import type { AISuggestion, TranscriptEntry } from '@wholesale-ai/shared';
+import { validateEnv } from '@wholesale-ai/shared';
 import { config } from 'dotenv';
 import { Server } from 'socket.io';
 import { WebSocket, WebSocketServer } from 'ws';
@@ -22,9 +23,17 @@ import { createTwilioRouter } from './lib/twilio-webhooks.js';
 
 config({ path: '.env.local' });
 
-const port = parseInt(process.env.PORT || '3001', 10);
-const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-const serverUrl = process.env.SERVER_URL || `http://localhost:${port}`;
+const env = validateEnv([
+  'PORT',
+  'FRONTEND_URL',
+  'SERVER_URL',
+  'DEEPGRAM_API_KEY',
+  'ANTHROPIC_API_KEY',
+] as const);
+
+const port = parseInt(env.PORT, 10);
+const frontendUrl = env.FRONTEND_URL;
+const serverUrl = env.SERVER_URL;
 
 const conversationHistory = new Map<string, TranscriptEntry[]>();
 const deepgramConnections = new Map<string, WebSocket>();
@@ -446,19 +455,16 @@ httpServer.on('request', async (req, res) => {
 
 httpServer.on('upgrade', (request: IncomingMessage, socket, head) => {
   const pathname = request.url || '';
-  const headers = request.headers;
 
-  console.log(`WebSocket upgrade request: ${pathname}`);
-  console.log(`  Headers: ${JSON.stringify(headers)}`);
+  if (pathname.startsWith('/socket.io')) {
+    return;
+  }
 
   if (pathname.startsWith('/twilio/stream')) {
-    console.log('Handling Twilio stream WebSocket upgrade');
+    console.log('Twilio stream WebSocket connected');
     wss.handleUpgrade(request, socket, head, (ws) => {
-      console.log('WebSocket upgrade complete, emitting connection');
       wss.emit('connection', ws, request);
     });
-  } else {
-    console.log('Unknown WebSocket path, ignoring');
   }
 });
 
