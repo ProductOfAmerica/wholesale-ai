@@ -5,12 +5,16 @@ import { config } from 'dotenv';
 import { Server } from 'socket.io';
 import { WebSocket, WebSocketServer } from 'ws';
 
-import { analyzeConversation, clearConversationContext, generateCallSummary, streamSuggestedResponse, updateConversationContext } from './lib/ai-analysis.js';
+import {
+  analyzeConversation,
+  clearConversationContext,
+  generateCallSummary,
+  streamSuggestedResponse,
+  updateConversationContext,
+} from './lib/ai-analysis.js';
 import {
   createAudioBridge,
-  getAllBridges,
   removeAudioBridge,
-  sendAudioToTwilio,
   twilioToDeepgram,
 } from './lib/audio-bridge.js';
 import { endCall, initiateOutboundCall } from './lib/twilio-service.js';
@@ -99,7 +103,7 @@ async function runAIAnalysis(
 
   try {
     console.log('Starting streaming AI response...');
-    
+
     socket.emit('ai_suggestion_start');
 
     const fullResponse = await streamSuggestedResponse(
@@ -113,15 +117,16 @@ async function runAIAnalysis(
 
     socket.emit('ai_suggestion_end', { suggested_response: fullResponse });
 
-    analyzeConversation(history, transcript).then((analysisResult) => {
-      socket.emit('ai_suggestion', {
-        ...analysisResult,
-        suggested_response: fullResponse,
-      });
-    }).catch(console.error);
+    analyzeConversation(history, transcript)
+      .then((analysisResult) => {
+        socket.emit('ai_suggestion', {
+          ...analysisResult,
+          suggested_response: fullResponse,
+        });
+      })
+      .catch(console.error);
 
     updateConversationContext(socketId, history).catch(console.error);
-
   } catch (error) {
     console.error('AI Analysis failed:', error);
 
@@ -138,7 +143,11 @@ async function runAIAnalysis(
   }
 }
 
-function processTranscript(socketId: string, transcript: string, speaker: 'seller' | 'user' = 'seller'): void {
+function processTranscript(
+  socketId: string,
+  transcript: string,
+  speaker: 'seller' | 'user' = 'seller'
+): void {
   const transcriptEntry = createTranscriptEntry(speaker, transcript);
   const history = updateConversationHistory(socketId, transcriptEntry);
 
@@ -150,7 +159,11 @@ function processTranscript(socketId: string, transcript: string, speaker: 'selle
   }
 }
 
-function handleDeepgramMessage(socketId: string, data: Buffer, speaker: 'seller' | 'user'): void {
+function handleDeepgramMessage(
+  socketId: string,
+  data: Buffer,
+  speaker: 'seller' | 'user'
+): void {
   const message = parseDeepgramMessage(data);
   if (!message) return;
 
@@ -161,10 +174,14 @@ function handleDeepgramMessage(socketId: string, data: Buffer, speaker: 'seller'
 
   const transcript = extractTranscript(message);
   if (transcript && isEndOfTurn(message)) {
-    console.log(`Processing EndOfTurn transcript (${speaker}): "${transcript}"`);
+    console.log(
+      `Processing EndOfTurn transcript (${speaker}): "${transcript}"`
+    );
     processTranscript(socketId, transcript, speaker);
   } else if (transcript) {
-    console.log(`Interim transcript (${speaker}, ${message.event}): "${transcript}"`);
+    console.log(
+      `Interim transcript (${speaker}, ${message.event}): "${transcript}"`
+    );
   }
 }
 
@@ -265,11 +282,16 @@ function createDeepgramConnection(
   }
 
   const speaker = track === 'inbound' ? 'user' : 'seller';
-  const connectionsMap = track === 'inbound' ? deepgramConnections : deepgramConnectionsOutbound;
+  const connectionsMap =
+    track === 'inbound' ? deepgramConnections : deepgramConnectionsOutbound;
   const readyMap = track === 'inbound' ? deepgramReady : deepgramReadyOutbound;
-  const buffersMap = track === 'inbound' ? pendingAudioBuffers : pendingAudioBuffersOutbound;
+  const buffersMap =
+    track === 'inbound' ? pendingAudioBuffers : pendingAudioBuffersOutbound;
 
-  console.log(`Starting Deepgram WebSocket for ${socket.id} (${track}/${speaker})`, config);
+  console.log(
+    `Starting Deepgram WebSocket for ${socket.id} (${track}/${speaker})`,
+    config
+  );
 
   const wsUrl = `wss://api.deepgram.com/v2/listen?model=${config.model}&encoding=${config.encoding}&sample_rate=${config.sampleRate}&eot_threshold=0.7&eot_timeout_ms=5000`;
 
@@ -285,7 +307,9 @@ function createDeepgramConnection(
 
     const buffered = buffersMap.get(socket.id);
     if (buffered && buffered.length > 0) {
-      console.log(`Flushing ${buffered.length} buffered audio packets to Deepgram (${track})`);
+      console.log(
+        `Flushing ${buffered.length} buffered audio packets to Deepgram (${track})`
+      );
       for (const audioData of buffered) {
         deepgramWS.send(audioData);
       }
@@ -298,7 +322,10 @@ function createDeepgramConnection(
   });
 
   deepgramWS.on('error', (error: Error) => {
-    console.error(`Deepgram WebSocket error for ${socket.id} (${track}):`, error);
+    console.error(
+      `Deepgram WebSocket error for ${socket.id} (${track}):`,
+      error
+    );
     socket.emit('deepgram_error', { error: error.message, track });
   });
 
@@ -309,14 +336,24 @@ function createDeepgramConnection(
     connectionsMap.delete(socket.id);
     readyMap.delete(socket.id);
     buffersMap.delete(socket.id);
-    socket.emit('deepgram_disconnected', { code, reason: reason.toString(), track });
+    socket.emit('deepgram_disconnected', {
+      code,
+      reason: reason.toString(),
+      track,
+    });
   });
 }
 
-function sendAudioToDeepgram(socketId: string, audioData: Buffer, track: 'inbound' | 'outbound' = 'inbound'): void {
-  const connectionsMap = track === 'inbound' ? deepgramConnections : deepgramConnectionsOutbound;
+function sendAudioToDeepgram(
+  socketId: string,
+  audioData: Buffer,
+  track: 'inbound' | 'outbound' = 'inbound'
+): void {
+  const connectionsMap =
+    track === 'inbound' ? deepgramConnections : deepgramConnectionsOutbound;
   const readyMap = track === 'inbound' ? deepgramReady : deepgramReadyOutbound;
-  const buffersMap = track === 'inbound' ? pendingAudioBuffers : pendingAudioBuffersOutbound;
+  const buffersMap =
+    track === 'inbound' ? pendingAudioBuffers : pendingAudioBuffersOutbound;
 
   const deepgramWS = connectionsMap.get(socketId);
   if (deepgramWS && deepgramWS.readyState === WebSocket.OPEN) {
@@ -329,7 +366,9 @@ function sendAudioToDeepgram(socketId: string, audioData: Buffer, track: 'inboun
     }
     buffer.push(audioData);
     if (buffer.length === 1) {
-      console.log(`Buffering audio for ${socketId} (${track}) until Deepgram connects...`);
+      console.log(
+        `Buffering audio for ${socketId} (${track}) until Deepgram connects...`
+      );
     }
   } else {
     console.warn(
@@ -549,7 +588,8 @@ wss.on('connection', (ws: WebSocket, _request: IncomingMessage) => {
       } else if (message.event === 'start') {
         handleTwilioStreamStart(state, message, ws);
       } else if (message.event === 'media' && message.media?.payload) {
-        const track = message.media.track === 'outbound' ? 'outbound' : 'inbound';
+        const track =
+          message.media.track === 'outbound' ? 'outbound' : 'inbound';
         handleTwilioStreamMedia(state, message.media.payload, track);
       } else if (message.event === 'stop') {
         handleTwilioStreamStop(state);
@@ -592,11 +632,16 @@ io.on('connection', (socket) => {
     sendAudioToDeepgram(socket.id, audioData);
   });
 
-  socket.on('webrtc_call_started', (data: { callSid: string; phoneNumber: string }) => {
-    console.log(`WebRTC call started: ${data.callSid} for socket ${socket.id}`);
-    activeCallSids.set(socket.id, data.callSid);
-    conversationHistory.set(socket.id, []);
-  });
+  socket.on(
+    'webrtc_call_started',
+    (data: { callSid: string; phoneNumber: string }) => {
+      console.log(
+        `WebRTC call started: ${data.callSid} for socket ${socket.id}`
+      );
+      activeCallSids.set(socket.id, data.callSid);
+      conversationHistory.set(socket.id, []);
+    }
+  );
 
   socket.on('twilio_call_start', async (data: { phoneNumber: string }) => {
     console.log('Starting Twilio call...');
@@ -674,7 +719,7 @@ io.on('connection', (socket) => {
   socket.on('request_call_summary', async (data: { duration: number }) => {
     console.log(`Generating call summary for ${socket.id}`);
     const history = conversationHistory.get(socket.id) || [];
-    
+
     if (history.length === 0) {
       socket.emit('call_summary', {
         duration: data.duration,

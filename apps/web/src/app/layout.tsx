@@ -3,7 +3,7 @@ import './globals.css';
 import type { Metadata } from 'next';
 import { cacheLife } from 'next/cache';
 import Link from 'next/link';
-
+import type React from 'react';
 import { Button } from '@/components/ui/button';
 
 export const metadata: Metadata = {

@@ -1,5 +1,9 @@
 import Anthropic from '@anthropic-ai/sdk';
-import type { AISuggestion, CallSummary, TranscriptEntry } from '@wholesale-ai/shared';
+import type {
+  AISuggestion,
+  CallSummary,
+  TranscriptEntry,
+} from '@wholesale-ai/shared';
 import { z } from 'zod';
 
 // Zod schema for structured response
@@ -75,7 +79,10 @@ export function getConversationContext(socketId: string): ConversationContext {
   return conversationContexts.get(socketId) || { recentHistory: [] };
 }
 
-export function setConversationContext(socketId: string, context: ConversationContext): void {
+export function setConversationContext(
+  socketId: string,
+  context: ConversationContext
+): void {
   conversationContexts.set(socketId, context);
 }
 
@@ -122,7 +129,9 @@ ${latestStatement}
 </latest_statement>`;
 }
 
-async function summarizeConversation(history: TranscriptEntry[]): Promise<string> {
+async function summarizeConversation(
+  history: TranscriptEntry[]
+): Promise<string> {
   try {
     const anthropic = getClient();
     const conversationText = history
@@ -153,10 +162,10 @@ export async function updateConversationContext(
   fullHistory: TranscriptEntry[]
 ): Promise<void> {
   if (fullHistory.length < SUMMARIZE_THRESHOLD) return;
-  
+
   const context = getConversationContext(socketId);
   const historyToSummarize = fullHistory.slice(0, -RECENT_TURNS_LIMIT);
-  
+
   if (historyToSummarize.length > (context.recentHistory?.length || 0)) {
     const summary = await summarizeConversation(historyToSummarize);
     if (summary) {
@@ -404,7 +413,11 @@ export async function streamSuggestedResponse(
   try {
     const anthropic = getClient();
     const context = socketId ? getConversationContext(socketId) : undefined;
-    const conversationPrompt = formatConversationForPrompt(history, latestStatement, context);
+    const conversationPrompt = formatConversationForPrompt(
+      history,
+      latestStatement,
+      context
+    );
 
     const stream = anthropic.messages.stream({
       model: 'claude-haiku-4-5-20251001',
@@ -420,7 +433,10 @@ export async function streamSuggestedResponse(
     let fullResponse = '';
 
     for await (const event of stream) {
-      if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
+      if (
+        event.type === 'content_block_delta' &&
+        event.delta.type === 'text_delta'
+      ) {
         const token = event.delta.text;
         fullResponse += token;
         onToken(token);
@@ -506,7 +522,11 @@ const summaryTool = {
   input_schema: {
     type: 'object' as const,
     properties: {
-      final_motivation_level: { type: 'number' as const, minimum: 1, maximum: 10 },
+      final_motivation_level: {
+        type: 'number' as const,
+        minimum: 1,
+        maximum: 10,
+      },
       pain_points: {
         type: 'array' as const,
         items: { type: 'string' as const },
@@ -526,7 +546,13 @@ const summaryTool = {
         description: 'Recommended follow-up actions',
       },
     },
-    required: ['final_motivation_level', 'pain_points', 'objections', 'summary', 'next_steps'],
+    required: [
+      'final_motivation_level',
+      'pain_points',
+      'objections',
+      'summary',
+      'next_steps',
+    ],
   },
 };
 

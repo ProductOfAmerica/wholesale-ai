@@ -1,7 +1,11 @@
 'use client';
 
-import type { AISuggestion, CallSummary, TranscriptEntry } from '@wholesale-ai/shared';
-import { Device, Call } from '@twilio/voice-sdk';
+import { Call, Device } from '@twilio/voice-sdk';
+import type {
+  AISuggestion,
+  CallSummary,
+  TranscriptEntry,
+} from '@wholesale-ai/shared';
 import { ClipboardCopyIcon, DownloadIcon, Loader2 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AISuggestions } from '@/components/AISuggestions';
@@ -131,6 +135,7 @@ function ActiveCallHeader({
   );
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: main call UI has inherent complexity
 export function CallInterface() {
   const { socket, connected } = useSocket();
   const [callState, setCallState] = useState<CallState>({
@@ -161,7 +166,8 @@ export function CallInterface() {
   useEffect(() => {
     async function initDevice() {
       try {
-        const serverUrl = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3001';
+        const serverUrl =
+          process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3001';
         const response = await fetch(`${serverUrl}/twilio/token`);
         if (!response.ok) {
           throw new Error('Failed to fetch token');
@@ -198,7 +204,10 @@ export function CallInterface() {
         console.error('Failed to initialize Twilio Device:', error);
         setCallState((prev) => ({
           ...prev,
-          error: error instanceof Error ? error.message : 'Failed to initialize phone',
+          error:
+            error instanceof Error
+              ? error.message
+              : 'Failed to initialize phone',
         }));
       }
     }
@@ -365,6 +374,7 @@ export function CallInterface() {
     };
   }, [callState.status, startMicCapture, stopMicCapture]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: socket is stable from context
   const handleStartCall = useCallback(
     async (phoneNumber: string) => {
       if (!deviceRef.current || !deviceReady) {
@@ -435,13 +445,13 @@ export function CallInterface() {
           setCallState((prev) => ({ ...prev, status: 'ended' }));
           activeCallRef.current = null;
         });
-
       } catch (error) {
         console.error('Failed to start call:', error);
         setCallState((prev) => ({
           ...prev,
           status: 'error',
-          error: error instanceof Error ? error.message : 'Failed to start call',
+          error:
+            error instanceof Error ? error.message : 'Failed to start call',
         }));
       }
     },
@@ -482,7 +492,10 @@ export function CallInterface() {
 
   const copyTranscript = useCallback(() => {
     const text = transcript
-      .map((t) => `[${new Date(t.timestamp).toLocaleTimeString()}] ${t.speaker}: ${t.text}`)
+      .map(
+        (t) =>
+          `[${new Date(t.timestamp).toLocaleTimeString()}] ${t.speaker}: ${t.text}`
+      )
       .join('\n');
     navigator.clipboard.writeText(text);
   }, [transcript]);
@@ -495,7 +508,9 @@ export function CallInterface() {
       transcript,
       summary: callSummary,
     };
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const blob = new Blob([JSON.stringify(data, null, 2)], {
+      type: 'application/json',
+    });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -503,7 +518,6 @@ export function CallInterface() {
     a.click();
     URL.revokeObjectURL(url);
   }, [transcript, callState.phoneNumber, callState.duration, callSummary]);
-
 
   return (
     <div className="space-y-6">
@@ -543,7 +557,10 @@ export function CallInterface() {
       )}
 
       {callState.status === 'idle' && (
-        <PhoneDialer onCall={handleStartCall} disabled={!connected || !deviceReady} />
+        <PhoneDialer
+          onCall={handleStartCall}
+          disabled={!connected || !deviceReady}
+        />
       )}
 
       {isCallActive && callState.phoneNumber && (
@@ -576,7 +593,9 @@ export function CallInterface() {
                 {summaryLoading ? (
                   <div className="flex flex-col items-center justify-center py-8 space-y-4">
                     <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                    <p className="text-sm text-muted-foreground">Analyzing call...</p>
+                    <p className="text-sm text-muted-foreground">
+                      Analyzing call...
+                    </p>
                     <div className="space-y-2 w-full">
                       <Skeleton className="h-4 w-full" />
                       <Skeleton className="h-4 w-3/4" />
@@ -597,7 +616,9 @@ export function CallInterface() {
 
                     {callSummary.pain_points.length > 0 && (
                       <div>
-                        <div className="text-sm font-medium mb-2">Pain Points</div>
+                        <div className="text-sm font-medium mb-2">
+                          Pain Points
+                        </div>
                         <div className="flex flex-wrap gap-2">
                           {callSummary.pain_points.map((point) => (
                             <Badge key={point} variant="secondary">
@@ -610,7 +631,9 @@ export function CallInterface() {
 
                     {callSummary.objections.length > 0 && (
                       <div>
-                        <div className="text-sm font-medium mb-2">Objections</div>
+                        <div className="text-sm font-medium mb-2">
+                          Objections
+                        </div>
                         <div className="flex flex-wrap gap-2">
                           {callSummary.objections.map((obj) => (
                             <Badge key={obj} variant="destructive">
@@ -623,7 +646,9 @@ export function CallInterface() {
 
                     <div>
                       <div className="text-sm font-medium mb-2">Next Steps</div>
-                      <p className="text-sm text-muted-foreground">{callSummary.next_steps}</p>
+                      <p className="text-sm text-muted-foreground">
+                        {callSummary.next_steps}
+                      </p>
                     </div>
                   </>
                 ) : (
@@ -643,7 +668,11 @@ export function CallInterface() {
           </div>
           <div className="p-4 bg-white rounded-lg border border-gray-200">
             <MotivationGauge
-              level={callSummary?.final_motivation_level || currentSuggestion?.motivation_level || 0}
+              level={
+                callSummary?.final_motivation_level ||
+                currentSuggestion?.motivation_level ||
+                0
+              }
               animated={true}
             />
           </div>

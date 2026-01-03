@@ -15,6 +15,7 @@ export function LiveTranscript({ transcript }: LiveTranscriptProps) {
   const transcriptEndRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to bottom when new messages arrive
+  // biome-ignore lint/correctness/useExhaustiveDependencies: transcript change triggers scroll
   useEffect(() => {
     transcriptEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [transcript]);

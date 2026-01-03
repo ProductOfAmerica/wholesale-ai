@@ -1,7 +1,11 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { parse as parseUrl } from 'node:url';
 import type { Server as SocketIOServer } from 'socket.io';
-import { generateAccessToken, generateClientTwiML, generateStreamTwiML } from './twilio-service.js';
+import {
+  generateAccessToken,
+  generateClientTwiML,
+  generateStreamTwiML,
+} from './twilio-service.js';
 
 function parseFormBody(body: string): Record<string, string> {
   const params: Record<string, string> = {};
@@ -149,11 +153,13 @@ export async function handleVoiceClientWebhook(
 }
 
 export function createTwilioRouter(io: SocketIOServer, serverUrl?: string) {
-  const resolvedServerUrl = serverUrl || process.env.SERVER_URL || 'http://localhost:3001';
+  const resolvedServerUrl =
+    serverUrl || process.env.SERVER_URL || 'http://localhost:3001';
 
   return async (
     req: IncomingMessage,
     res: ServerResponse
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: webhook router has many routes
   ): Promise<boolean> => {
     const parsed = parseUrl(req.url || '', true);
     const pathname = parsed.pathname || '';

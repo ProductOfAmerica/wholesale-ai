@@ -1,15 +1,15 @@
 'use client';
 
-import type {AISuggestion, TranscriptEntry} from '@wholesale-ai/shared';
-import {Suspense, useCallback, useEffect, useState} from 'react';
-import {AISuggestions} from '@/components/AISuggestions';
-import {AudioControls} from '@/components/AudioControls';
-import {AudioLevelBars, AudioVisualizer} from '@/components/AudioVisualizer';
-import {LiveTranscript} from '@/components/LiveTranscript';
-import {MotivationGauge} from '@/components/MotivationGauge';
-import {useAudioStream} from '@/hooks/useAudioStream';
-import {useDeepgramTranscriptProxy} from '@/hooks/useDeepgramTranscriptProxy';
-import {useSocket} from '@/hooks/useSocket';
+import type { AISuggestion, TranscriptEntry } from '@wholesale-ai/shared';
+import { Suspense, useCallback, useEffect, useState } from 'react';
+import { AISuggestions } from '@/components/AISuggestions';
+import { AudioControls } from '@/components/AudioControls';
+import { AudioLevelBars, AudioVisualizer } from '@/components/AudioVisualizer';
+import { LiveTranscript } from '@/components/LiveTranscript';
+import { MotivationGauge } from '@/components/MotivationGauge';
+import { useAudioStream } from '@/hooks/useAudioStream';
+import { useDeepgramTranscriptProxy } from '@/hooks/useDeepgramTranscriptProxy';
+import { useSocket } from '@/hooks/useSocket';
 
 // Environment warning components
 function WarningIcon() {

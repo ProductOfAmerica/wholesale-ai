@@ -1,4 +1,4 @@
-import type {Twilio as TwilioClient} from 'twilio';
+import type { Twilio as TwilioClient } from 'twilio';
 import Twilio from 'twilio';
 
 let twilioClient: TwilioClient | null = null;
@@ -102,10 +102,7 @@ export async function getCallStatus(
 export function generateStreamTwiML(streamUrl: string): string {
   const response = new Twilio.twiml.VoiceResponse();
 
-  response.say(
-    { voice: 'Polly.Amy' },
-    'Connected.'
-  );
+  response.say({ voice: 'Polly.Amy' }, 'Connected.');
 
   const start = response.start();
   start.stream({
@@ -142,7 +139,9 @@ export function generateAccessToken(identity: string): string {
   const twimlAppSid = process.env.TWILIO_TWIML_APP_SID;
 
   if (!accountSid || !apiKeySid || !apiKeySecret || !twimlAppSid) {
-    throw new Error('Twilio API key credentials or TwiML App SID not configured');
+    throw new Error(
+      'Twilio API key credentials or TwiML App SID not configured'
+    );
   }
 
   const AccessToken = Twilio.jwt.AccessToken;

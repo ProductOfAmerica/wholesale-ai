@@ -19,7 +19,8 @@ export function AISuggestions({
   initialScript,
   streamingText = '',
 }: AISuggestionsProps) {
-  const displayText = streamingText || suggestion?.suggested_response || initialScript;
+  const displayText =
+    streamingText || suggestion?.suggested_response || initialScript;
   const isStreaming = loading && streamingText.length > 0;
 
   return (

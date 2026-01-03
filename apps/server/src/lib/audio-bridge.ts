@@ -1,4 +1,4 @@
-import type {WebSocket} from 'ws';
+import type { WebSocket } from 'ws';
 
 const MULAW_DECODE_TABLE = new Int16Array([
   -32124, -31100, -30076, -29052, -28028, -27004, -25980, -24956, -23932,

@@ -15,7 +15,8 @@ import {
 } from '@/components/ui/sheet';
 import { Textarea } from '@/components/ui/textarea';
 
-const DEFAULT_SCRIPT = `Hi! Thanks for picking up. I specialize in helping homeowners sell quickly without the hassle of repairs or showings. Do you have a few minutes to chat about your property?`;
+const DEFAULT_SCRIPT =
+  'Hi! Thanks for picking up. I specialize in helping homeowners sell quickly without the hassle of repairs or showings. Do you have a few minutes to chat about your property?';
 
 const STORAGE_KEY = 'wholesale-ai-config';
 
@@ -48,7 +49,9 @@ interface ConfigSheetProps {
 }
 
 export function ConfigSheet({ onConfigChange }: ConfigSheetProps) {
-  const [config, setConfig] = useState<Config>({ initialScript: DEFAULT_SCRIPT });
+  const [config, setConfig] = useState<Config>({
+    initialScript: DEFAULT_SCRIPT,
+  });
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
@@ -96,7 +99,8 @@ export function ConfigSheet({ onConfigChange }: ConfigSheetProps) {
               className="min-h-[200px] resize-none"
             />
             <p className="text-xs text-muted-foreground">
-              This script will be shown as the suggested response when a call starts.
+              This script will be shown as the suggested response when a call
+              starts.
             </p>
           </div>
 
@@ -110,7 +114,9 @@ export function ConfigSheet({ onConfigChange }: ConfigSheetProps) {
 }
 
 export function useConfig() {
-  const [config, setConfig] = useState<Config>({ initialScript: DEFAULT_SCRIPT });
+  const [config, setConfig] = useState<Config>({
+    initialScript: DEFAULT_SCRIPT,
+  });
 
   useEffect(() => {
     setConfig(loadConfig());
