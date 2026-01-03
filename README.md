@@ -126,10 +126,10 @@ pnpm dev:server  # Socket.io on :3001
 
 ```mermaid
 flowchart TB
-    subgraph Client["🌐 Client Browser (Next.js :3000)"]
-        UI["📞 Call Interface<br/>PhoneDialer"]
-        Transcript["📝 Live Transcript"]
-        Suggestions["💡 AI Suggestions<br/>MotivationGauge"]
+    subgraph Client["Client Browser - Next.js :3000"]
+        UI["Call Interface"]
+        Transcript["Live Transcript"]
+        Suggestions["AI Suggestions"]
         SocketClient["Socket.io Client"]
         
         UI --> SocketClient
@@ -137,15 +137,18 @@ flowchart TB
         Suggestions --> SocketClient
     end
     
-    subgraph Server["⚙️ Server (apps/server :3001)"]
-        SocketServer["Socket.io Server"]
-        
-        SocketServer --> Twilio["📱 Twilio Voice"]
-        SocketServer --> Claude["🤖 Anthropic Claude"]
-        SocketServer --> Deepgram["🎤 Deepgram STT"]
-    end
-    
     SocketClient <-->|WebSocket| SocketServer
+    
+    subgraph Server["Server - apps/server :3001"]
+        SocketServer["Socket.io Server"]
+        Twilio["Twilio Voice"]
+        Claude["Anthropic Claude"]
+        Deepgram["Deepgram STT"]
+        
+        SocketServer --> Twilio
+        SocketServer --> Claude
+        SocketServer --> Deepgram
+    end
 ```
 
 ## 📡 API Reference
