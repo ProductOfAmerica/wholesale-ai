@@ -26,7 +26,7 @@ config({ path: '.env.local' });
 const env = validateEnv([
   'PORT',
   'FRONTEND_URL',
-  'SERVER_URL',
+  'RAILWAY_PUBLIC_DOMAIN',
   'DEEPGRAM_API_KEY',
   'ANTHROPIC_API_KEY',
   'SOCKET_API_KEY',
@@ -34,7 +34,7 @@ const env = validateEnv([
 
 const port = parseInt(env.PORT, 10);
 const frontendUrl = env.FRONTEND_URL.replace(/\/$/, '');
-const serverUrl = env.SERVER_URL.replace(/\/$/, '');
+const serverUrl = `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`;
 
 const conversationHistory = new Map<string, TranscriptEntry[]>();
 const deepgramConnections = new Map<string, WebSocket>();
@@ -786,7 +786,7 @@ async function handleTwilioCallStart(
   if (serverUrl.includes('localhost')) {
     socket.emit('twilio_error', {
       error:
-        'Cannot make calls with localhost. Set SERVER_URL to your ngrok/public URL (e.g., https://abc123.ngrok.io)',
+        'Cannot make calls with localhost. Set RAILWAY_PUBLIC_DOMAIN to a public URL',
     });
     return;
   }

@@ -1,8 +1,9 @@
 import { type NextRequest, NextResponse } from 'next/server';
 
-const allowedOrigins = [process.env.SERVER_URL, 'http://localhost:3001'].filter(
-  Boolean
-) as string[];
+const allowedOrigins = [
+  process.env.VERCEL_PROJECT_PRODUCTION_URL,
+  'http://localhost:3001',
+].filter(Boolean) as string[];
 
 const corsOptions = {
   'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',

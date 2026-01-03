@@ -26,7 +26,7 @@
         "DEEPGRAM_API_KEY",
         "FRONTEND_URL",
         "PORT",
-        "SERVER_URL",
+        "RAILWAY_PUBLIC_DOMAIN",
         "TWILIO_API_KEY_SID",
         "TWILIO_API_KEY_SECRET",
         "TWILIO_TWIML_APP_SID"
@@ -68,7 +68,7 @@
         "DEEPGRAM_API_KEY",
         "FRONTEND_URL",
         "PORT",
-        "SERVER_URL",
+        "RAILWAY_PUBLIC_DOMAIN",
         "TWILIO_API_KEY_SID",
         "TWILIO_API_KEY_SECRET",
         "TWILIO_TWIML_APP_SID"
