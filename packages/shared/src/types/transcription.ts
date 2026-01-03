@@ -14,22 +14,6 @@ export interface AISuggestion {
   error?: string;
 }
 
-export interface DeepgramTranscriptResult {
-  channel: {
-    alternatives: Array<{
-      transcript: string;
-    }>;
-  };
-  is_final: boolean;
-}
-
-export interface TranscriptionConfig {
-  model: string;
-  smart_format: boolean;
-  language: string;
-  punctuate: boolean;
-}
-
 export type ConversationHistory = TranscriptEntry[];
 
 export interface AnalysisResult {

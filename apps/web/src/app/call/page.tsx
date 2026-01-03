@@ -1,7 +1,7 @@
 import { cacheLife } from 'next/cache';
 import { Suspense } from 'react';
 
-import { CallShell } from '@/components/CallShell';
+import { AudioShell } from '@/components/AudioShell';
 
 // Static shell component for PPR
 async function CallPageShell() {
@@ -22,7 +22,7 @@ async function CallPageShell() {
           </div>
         }
       >
-        <CallShell />
+        <AudioShell />
       </Suspense>
     </main>
   );

@@ -126,15 +126,13 @@ export function AudioShell() {
     };
   }, []);
 
-  // Handle Deepgram transcripts
+  // Handle Deepgram transcripts - only send to server, don't add locally (avoid duplicates)
   useEffect(() => {
     deepgramTranscript.setOnTranscriptUpdate((entry: TranscriptEntry) => {
       console.log('Deepgram transcript:', entry);
 
-      // Add to local transcript
-      setTranscript((prev) => [...prev, entry]);
-
-      // Send to server for AI analysis
+      // Only send to server for AI analysis - don't add to local transcript here
+      // Server will process and send back, preventing duplicates
       if (socket && entry.text.trim()) {
         socket.emit('transcript_update', entry);
 
@@ -162,7 +160,7 @@ export function AudioShell() {
       await deepgramTranscript.connect();
 
       // Start audio recording and stream to Deepgram via Socket.io proxy
-      await audioStream.startRecording((audioChunk: Blob) => {
+      await audioStream.startRecording((audioChunk: ArrayBuffer) => {
         deepgramTranscript.sendAudio(audioChunk);
       });
 

@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import type {
   AISuggestion,
   ConversationHistory,
-  DeepgramTranscriptResult,
   TranscriptEntry,
 } from './transcription.js';
 
@@ -51,21 +50,6 @@ describe('AISuggestion', () => {
 
     expect(suggestion.objection_type).toBeUndefined();
     expect(suggestion.error).toBeUndefined();
-  });
-});
-
-describe('DeepgramTranscriptResult', () => {
-  it('should have correct Deepgram API shape', () => {
-    const result: DeepgramTranscriptResult = {
-      channel: {
-        alternatives: [{ transcript: 'Hello world' }],
-      },
-      is_final: true,
-    };
-
-    expect(result.channel.alternatives).toHaveLength(1);
-    expect(result.channel.alternatives[0].transcript).toBe('Hello world');
-    expect(result.is_final).toBe(true);
   });
 });
 

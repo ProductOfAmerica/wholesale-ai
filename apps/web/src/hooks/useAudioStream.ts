@@ -2,7 +2,6 @@
 
 import { useCallback, useRef, useState } from 'react';
 
-// Type definitions
 interface AudioStreamConfig {
   sampleRate: number;
   channelCount: number;
@@ -33,73 +32,50 @@ export function useAudioStream(
   });
 
   const mediaStreamRef = useRef<MediaStream | null>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
+  const processorRef = useRef<ScriptProcessorNode | null>(null);
+  const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const onDataCallbackRef = useRef<((chunk: ArrayBuffer) => void) | null>(null);
   const animationFrameRef = useRef<number | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
 
-  const onDataAvailable = useRef<((chunk: Blob) => void) | null>(null);
-
-  // Helper functions for audio setup
   const clearErrors = useCallback(() => {
     setState((prev) => ({ ...prev, error: null }));
   }, []);
 
-  const requestMicrophoneAccess =
-    useCallback(async (): Promise<MediaStream> => {
-      return navigator.mediaDevices.getUserMedia({
-        audio: {
-          sampleRate: config.sampleRate,
-          channelCount: config.channelCount,
-          echoCancellation: config.echoCancellation,
-          noiseSuppression: config.noiseSuppression,
-          autoGainControl: true,
-        },
-      });
-    }, [config]);
-
-  const createDataHandler = useCallback((onData: (chunk: Blob) => void) => {
-    return (event: BlobEvent) => {
-      if (event.data.size > 0) {
-        onData(event.data);
+  const floatTo16BitPCM = useCallback(
+    (float32Array: Float32Array): ArrayBuffer => {
+      const buffer = new ArrayBuffer(float32Array.length * 2);
+      const view = new DataView(buffer);
+      for (let i = 0; i < float32Array.length; i++) {
+        const s = Math.max(-1, Math.min(1, float32Array[i]));
+        view.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true);
       }
-    };
-  }, []);
-
-  const createErrorHandler = useCallback(() => {
-    return (event: Event) => {
-      console.error('MediaRecorder error:', event);
-      setState((prev) => ({
-        ...prev,
-        error: 'Recording error occurred',
-        isRecording: false,
-      }));
-    };
-  }, []);
-
-  const setupMediaRecorder = useCallback(
-    (stream: MediaStream, onData: (chunk: Blob) => void): MediaRecorder => {
-      const mediaRecorder = new MediaRecorder(stream, {
-        mimeType: 'audio/webm;codecs=opus',
-        audioBitsPerSecond: 128000,
-      });
-
-      mediaStreamRef.current = stream;
-      onDataAvailable.current = onData;
-      mediaRecorderRef.current = mediaRecorder;
-
-      mediaRecorder.ondataavailable = createDataHandler(onData);
-      mediaRecorder.onerror = createErrorHandler();
-
-      return mediaRecorder;
+      return buffer;
     },
-    [createDataHandler, createErrorHandler]
+    []
   );
 
-  // Set up audio level monitoring
-  const setupAudioLevelMonitoring = useCallback(
-    (stream: MediaStream) => {
-      if (!audioContextRef.current) {
+  const startRecording = useCallback(
+    async (onData?: (chunk: ArrayBuffer) => void) => {
+      try {
+        console.log('🎤 Starting audio recording (PCM linear16)...');
+        clearErrors();
+
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            sampleRate: config.sampleRate,
+            channelCount: config.channelCount,
+            echoCancellation: config.echoCancellation,
+            noiseSuppression: config.noiseSuppression,
+            autoGainControl: true,
+          },
+        });
+
+        console.log('🎤 Microphone access granted');
+        mediaStreamRef.current = stream;
+        onDataCallbackRef.current = onData || null;
+
         const AudioContextConstructor =
           window.AudioContext ||
           (
@@ -107,129 +83,125 @@ export function useAudioStream(
               webkitAudioContext?: typeof AudioContext;
             }
           ).webkitAudioContext;
-        if (AudioContextConstructor) {
-          audioContextRef.current = new AudioContextConstructor();
+
+        if (!AudioContextConstructor) {
+          throw new Error('AudioContext not supported');
         }
-      }
 
-      const audioContext = audioContextRef.current;
-      if (!audioContext) return;
+        const audioContext = new AudioContextConstructor({
+          sampleRate: config.sampleRate,
+        });
+        audioContextRef.current = audioContext;
 
-      const source = audioContext.createMediaStreamSource(stream);
-      const analyser = audioContext.createAnalyser();
+        const source = audioContext.createMediaStreamSource(stream);
+        sourceRef.current = source;
 
-      analyser.fftSize = 256;
-      analyser.smoothingTimeConstant = 0.8;
-      source.connect(analyser);
+        // Create analyser for audio level monitoring
+        const analyser = audioContext.createAnalyser();
+        analyser.fftSize = 256;
+        analyser.smoothingTimeConstant = 0.8;
+        source.connect(analyser);
+        analyserRef.current = analyser;
 
-      analyserRef.current = analyser;
+        // Use ScriptProcessorNode to capture raw PCM
+        // Buffer size 4096 at 16kHz = ~256ms chunks
+        const processor = audioContext.createScriptProcessor(4096, 1, 1);
+        processorRef.current = processor;
 
-      const updateAudioLevel = () => {
-        if (!analyserRef.current) return;
+        processor.onaudioprocess = (e) => {
+          const inputData = e.inputBuffer.getChannelData(0);
+          const pcmData = floatTo16BitPCM(inputData);
 
-        const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
-        analyserRef.current.getByteFrequencyData(dataArray);
+          if (onDataCallbackRef.current) {
+            onDataCallbackRef.current(pcmData);
+          }
+        };
 
-        const average =
-          dataArray.reduce((sum, value) => sum + value, 0) / dataArray.length;
-        const normalizedLevel = Math.min(average / 128, 1); // Normalize to 0-1
+        source.connect(processor);
+        processor.connect(audioContext.destination);
 
-        setState((prev) => ({ ...prev, audioLevel: normalizedLevel }));
+        console.log(
+          '🎤 PCM capture started, sample rate:',
+          audioContext.sampleRate
+        );
 
-        if (state.isRecording) {
-          animationFrameRef.current = requestAnimationFrame(updateAudioLevel);
-        }
-      };
+        // Start audio level monitoring
+        const updateAudioLevel = () => {
+          if (!analyserRef.current) return;
 
-      updateAudioLevel();
-    },
-    [state.isRecording]
-  );
+          const dataArray = new Uint8Array(
+            analyserRef.current.frequencyBinCount
+          );
+          analyserRef.current.getByteFrequencyData(dataArray);
 
-  const setupAudioMonitoring = useCallback(
-    (stream: MediaStream) => {
-      setupAudioLevelMonitoring(stream);
-    },
-    [setupAudioLevelMonitoring]
-  );
+          const average =
+            dataArray.reduce((sum, value) => sum + value, 0) / dataArray.length;
+          const normalizedLevel = Math.min(average / 128, 1);
 
-  const startMediaRecorder = useCallback((mediaRecorder: MediaRecorder) => {
-    // Start recording with 100ms timeslice for low latency
-    mediaRecorder.start(100);
-  }, []);
+          setState((prev) => ({ ...prev, audioLevel: normalizedLevel }));
 
-  const updateRecordingState = useCallback((isRecording: boolean) => {
-    setState((prev) => ({
-      ...prev,
-      isRecording,
-      isConnected: isRecording,
-    }));
-  }, []);
+          if (audioContextRef.current?.state === 'running') {
+            animationFrameRef.current = requestAnimationFrame(updateAudioLevel);
+          }
+        };
+        updateAudioLevel();
 
-  const handleRecordingError = useCallback((error: unknown) => {
-    console.error('Error starting recording:', error);
-    setState((prev) => ({
-      ...prev,
-      error:
-        error instanceof Error ? error.message : 'Failed to start recording',
-      isRecording: false,
-      isConnected: false,
-    }));
-  }, []);
+        setState((prev) => ({
+          ...prev,
+          isRecording: true,
+          isConnected: true,
+          error: null,
+        }));
 
-  const startRecording = useCallback(
-    async (onData?: (chunk: Blob) => void) => {
-      try {
-        clearErrors();
-        const stream = await requestMicrophoneAccess();
-        const mediaRecorder = setupMediaRecorder(stream, onData || (() => {}));
-
-        setupAudioMonitoring(stream);
-        startMediaRecorder(mediaRecorder);
-        updateRecordingState(true);
+        console.log('🎤 Recording state updated to true');
       } catch (error) {
-        handleRecordingError(error);
+        console.error('🎤 Failed to start recording:', error);
+        setState((prev) => ({
+          ...prev,
+          error:
+            error instanceof Error
+              ? error.message
+              : 'Failed to start recording',
+          isRecording: false,
+          isConnected: false,
+        }));
       }
     },
-    [
-      clearErrors,
-      requestMicrophoneAccess,
-      setupMediaRecorder,
-      setupAudioMonitoring,
-      startMediaRecorder,
-      updateRecordingState,
-      handleRecordingError,
-    ]
+    [config, clearErrors, floatTo16BitPCM]
   );
 
   const stopRecording = useCallback(() => {
-    // Stop MediaRecorder
-    if (
-      mediaRecorderRef.current &&
-      mediaRecorderRef.current.state !== 'inactive'
-    ) {
-      mediaRecorderRef.current.stop();
-    }
+    console.log('🎤 Stopping recording...');
 
-    // Stop all tracks
-    if (mediaStreamRef.current) {
-      mediaStreamRef.current.getTracks().forEach((track) => {
-        track.stop();
-      });
-      mediaStreamRef.current = null;
-    }
-
-    // Cancel animation frame
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
       animationFrameRef.current = null;
     }
 
-    // Clean up audio context
+    if (processorRef.current) {
+      processorRef.current.disconnect();
+      processorRef.current = null;
+    }
+
+    if (sourceRef.current) {
+      sourceRef.current.disconnect();
+      sourceRef.current = null;
+    }
+
     if (audioContextRef.current) {
       audioContextRef.current.close().catch(console.error);
       audioContextRef.current = null;
     }
+
+    if (mediaStreamRef.current) {
+      for (const track of mediaStreamRef.current.getTracks()) {
+        track.stop();
+      }
+      mediaStreamRef.current = null;
+    }
+
+    analyserRef.current = null;
+    onDataCallbackRef.current = null;
 
     setState((prev) => ({
       ...prev,
@@ -238,10 +210,9 @@ export function useAudioStream(
       audioLevel: 0,
     }));
 
-    onDataAvailable.current = null;
+    console.log('🎤 Recording stopped');
   }, []);
 
-  // Clean up on unmount
   const cleanup = useCallback(() => {
     stopRecording();
   }, [stopRecording]);

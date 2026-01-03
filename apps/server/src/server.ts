@@ -6,16 +6,13 @@ import { WebSocket } from 'ws';
 
 import { analyzeConversation } from './lib/ai-analysis.js';
 
-// Load environment variables from local .env.local file
 config({ path: '.env.local' });
 
 const port = parseInt(process.env.PORT || '3001', 10);
 const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
 
-// Create HTTP server
 const httpServer = createServer();
 
-// Initialize Socket.io with CORS configuration
 const io = new Server(httpServer, {
   cors: {
     origin: [frontendUrl, 'http://localhost:3000'],
@@ -26,21 +23,27 @@ const io = new Server(httpServer, {
   pingInterval: 25000,
 });
 
-// Store conversation history per socket
 const conversationHistory = new Map<string, TranscriptEntry[]>();
 
-// Store Deepgram WebSocket connections per socket
 const deepgramConnections = new Map<string, WebSocket>();
 
-// Helper functions for message processing
-interface DeepgramMessage {
-  type: string;
-  channel?: {
-    alternatives?: Array<{
-      transcript: string;
-    }>;
-  };
+interface FluxTurnInfo {
+  type: 'TurnInfo' | 'Connected';
+  event?:
+    | 'Update'
+    | 'StartOfTurn'
+    | 'EagerEndOfTurn'
+    | 'TurnResumed'
+    | 'EndOfTurn';
+  turn_index?: number;
+  transcript?: string;
+  words?: Array<{ word: string; confidence: number }>;
+  end_of_turn_confidence?: number;
+  request_id?: string;
+  sequence_id?: number;
 }
+
+type DeepgramMessage = FluxTurnInfo;
 
 function parseDeepgramMessage(data: Buffer): DeepgramMessage | null {
   try {
@@ -52,14 +55,14 @@ function parseDeepgramMessage(data: Buffer): DeepgramMessage | null {
 }
 
 function extractTranscript(message: DeepgramMessage): string | null {
-  if (
-    message.type === 'Results' &&
-    message.channel?.alternatives?.[0]?.transcript
-  ) {
-    const transcript = message.channel.alternatives[0].transcript.trim();
-    return transcript || null;
+  if (message.type === 'TurnInfo' && message.transcript) {
+    return message.transcript.trim() || null;
   }
   return null;
+}
+
+function isEndOfTurn(message: DeepgramMessage): boolean {
+  return message.type === 'TurnInfo' && message.event === 'EndOfTurn';
 }
 
 function createTranscriptEntry(speaker: string, text: string): TranscriptEntry {
@@ -126,16 +129,19 @@ function handleDeepgramMessage(socketId: string, data: Buffer): void {
   const message = parseDeepgramMessage(data);
   if (!message) return;
 
-  console.log(`Deepgram message for ${socketId}:`, message.type);
+  console.log(`Deepgram message for ${socketId}:`, message.type, message);
 
   // Forward Deepgram messages to client
   const socket = io.sockets.sockets.get(socketId);
   socket?.emit('deepgram_message', message);
 
-  // Process transcript if available
+  // Process transcript only on EndOfTurn (final)
   const transcript = extractTranscript(message);
-  if (transcript) {
+  if (transcript && isEndOfTurn(message)) {
+    console.log(`Processing EndOfTurn transcript: "${transcript}"`);
     processTranscript(socketId, transcript);
+  } else if (transcript) {
+    console.log(`Interim transcript (${message.event}): "${transcript}"`);
   }
 }
 
@@ -195,6 +201,78 @@ async function processDemoMessage(
   }
 }
 
+function closeDeepgramConnection(socketId: string): void {
+  const deepgramWS = deepgramConnections.get(socketId);
+  if (deepgramWS) {
+    deepgramWS.send(JSON.stringify({ type: 'CloseStream' }));
+    deepgramWS.close();
+    deepgramConnections.delete(socketId);
+    console.log(`Deepgram WebSocket closed for ${socketId}`);
+  }
+}
+
+interface DeepgramConfig {
+  model: string;
+  encoding: string;
+  sampleRate: number;
+}
+
+function createDeepgramConnection(
+  socket: ReturnType<typeof io.sockets.sockets.get> & {
+    id: string;
+    emit: (event: string, data?: unknown) => void;
+  },
+  config: DeepgramConfig
+): void {
+  const apiKey = process.env.DEEPGRAM_API_KEY;
+  if (!apiKey) {
+    socket.emit('deepgram_error', { error: 'Deepgram API key not configured' });
+    return;
+  }
+
+  console.log(`Starting Deepgram WebSocket for ${socket.id}`, config);
+
+  const wsUrl = `wss://api.deepgram.com/v2/listen?model=${config.model}&encoding=${config.encoding}&sample_rate=${config.sampleRate}`;
+
+  const deepgramWS = new WebSocket(wsUrl, {
+    headers: { Authorization: `token ${apiKey}` },
+  });
+
+  deepgramWS.on('open', () => {
+    console.log(`Deepgram WebSocket connected for ${socket.id}`);
+    deepgramConnections.set(socket.id, deepgramWS);
+    socket.emit('deepgram_connected');
+  });
+
+  deepgramWS.on('message', (data: Buffer) => {
+    handleDeepgramMessage(socket.id, data);
+  });
+
+  deepgramWS.on('error', (error: Error) => {
+    console.error(`Deepgram WebSocket error for ${socket.id}:`, error);
+    socket.emit('deepgram_error', { error: error.message });
+  });
+
+  deepgramWS.on('close', (code: number, reason: Buffer) => {
+    console.log(
+      `Deepgram WebSocket closed for ${socket.id}: ${code} ${reason}`
+    );
+    deepgramConnections.delete(socket.id);
+    socket.emit('deepgram_disconnected', { code, reason: reason.toString() });
+  });
+}
+
+function sendAudioToDeepgram(socketId: string, audioData: Buffer): void {
+  const deepgramWS = deepgramConnections.get(socketId);
+  if (deepgramWS && deepgramWS.readyState === WebSocket.OPEN) {
+    deepgramWS.send(audioData);
+  } else {
+    console.warn(
+      `Cannot send audio for ${socketId}: Deepgram WebSocket not connected`
+    );
+  }
+}
+
 async function runDemoConversation(socketId: string): Promise<void> {
   console.log(`Running demo conversation for ${socketId}`);
 
@@ -244,76 +322,15 @@ io.on('connection', (socket) => {
 
   socket.on('end_call', () => {
     console.log(`Call ended by ${socket.id}`);
-    // Close Deepgram connection if exists
-    const deepgramWS = deepgramConnections.get(socket.id);
-    if (deepgramWS) {
-      deepgramWS.send(JSON.stringify({ type: 'CloseStream' }));
-      deepgramWS.close();
-      deepgramConnections.delete(socket.id);
-      console.log(`Deepgram WebSocket closed for ${socket.id}`);
-    }
+    closeDeepgramConnection(socket.id);
   });
 
-  // Handle Deepgram WebSocket connection
-  socket.on(
-    'deepgram_connect',
-    (config: { model: string; encoding: string; sampleRate: number }) => {
-      const apiKey = process.env.DEEPGRAM_API_KEY;
-      if (!apiKey) {
-        socket.emit('deepgram_error', {
-          error: 'Deepgram API key not configured',
-        });
-        return;
-      }
+  socket.on('deepgram_connect', (config: DeepgramConfig) => {
+    createDeepgramConnection(socket, config);
+  });
 
-      console.log(`Starting Deepgram WebSocket for ${socket.id}`, config);
-
-      const wsUrl = `wss://api.deepgram.com/v2/listen?model=${config.model}&encoding=${config.encoding}&sample_rate=${config.sampleRate}`;
-
-      const deepgramWS = new WebSocket(wsUrl, {
-        headers: {
-          Authorization: `token ${apiKey}`,
-        },
-      });
-
-      deepgramWS.on('open', () => {
-        console.log(`Deepgram WebSocket connected for ${socket.id}`);
-        deepgramConnections.set(socket.id, deepgramWS);
-        socket.emit('deepgram_connected');
-      });
-
-      deepgramWS.on('message', (data: Buffer) => {
-        handleDeepgramMessage(socket.id, data);
-      });
-
-      deepgramWS.on('error', (error: Error) => {
-        console.error(`Deepgram WebSocket error for ${socket.id}:`, error);
-        socket.emit('deepgram_error', { error: error.message });
-      });
-
-      deepgramWS.on('close', (code: number, reason: Buffer) => {
-        console.log(
-          `Deepgram WebSocket closed for ${socket.id}: ${code} ${reason}`
-        );
-        deepgramConnections.delete(socket.id);
-        socket.emit('deepgram_disconnected', {
-          code,
-          reason: reason.toString(),
-        });
-      });
-    }
-  );
-
-  // Handle audio data forwarding to Deepgram
   socket.on('deepgram_audio', (audioData: Buffer) => {
-    const deepgramWS = deepgramConnections.get(socket.id);
-    if (deepgramWS && deepgramWS.readyState === WebSocket.OPEN) {
-      deepgramWS.send(audioData);
-    } else {
-      console.warn(
-        `Cannot send audio for ${socket.id}: Deepgram WebSocket not connected`
-      );
-    }
+    sendAudioToDeepgram(socket.id, audioData);
   });
 
   // Handle text simulation for testing
@@ -328,17 +345,7 @@ io.on('connection', (socket) => {
 
   socket.on('disconnect', (reason) => {
     console.log(`Client disconnected: ${socket.id} (${reason})`);
-
-    // Clean up Deepgram connection
-    const deepgramWS = deepgramConnections.get(socket.id);
-    if (deepgramWS) {
-      deepgramWS.send(JSON.stringify({ type: 'CloseStream' }));
-      deepgramWS.close();
-      deepgramConnections.delete(socket.id);
-      console.log(`Cleaned up Deepgram WebSocket for ${socket.id}`);
-    }
-
-    // Clean up conversation history
+    closeDeepgramConnection(socket.id);
     conversationHistory.delete(socket.id);
   });
 });

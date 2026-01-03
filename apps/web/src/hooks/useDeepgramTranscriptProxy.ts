@@ -1,7 +1,8 @@
 'use client';
 
+import type { LiveTranscriptionEvent } from '@deepgram/sdk';
 import type { TranscriptEntry } from '@wholesale-ai/shared';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import type { Socket } from 'socket.io-client';
 
 interface DeepgramConfig {
@@ -10,12 +11,11 @@ interface DeepgramConfig {
   sampleRate: number;
 }
 
-interface DeepgramMessage {
-  type: string;
-  channel?: { alternatives?: { transcript?: string }[] };
+type DeepgramMessage = (LiveTranscriptionEvent | { type: string }) & {
   is_final?: boolean;
+  channel?: LiveTranscriptionEvent['channel'];
   data?: { speaker?: number; turn_id?: string };
-}
+};
 
 interface DeepgramHandlers {
   handleConnected: (resolve?: () => void) => void;
@@ -30,7 +30,7 @@ interface DeepgramHandlers {
 interface DeepgramTranscriptProxy {
   connect: () => Promise<void>;
   disconnect: () => void;
-  sendAudio: (audioData: Blob) => void;
+  sendAudio: (audioData: ArrayBuffer) => void;
   isConnected: boolean;
   error: string | null;
   transcript: string;
@@ -189,22 +189,15 @@ export function useDeepgramTranscriptProxy(
   }, [socket, isConnected]);
 
   const sendAudio = useCallback(
-    (audioData: Blob) => {
-      if (!socket || !isConnected) {
-        console.warn('Cannot send audio: not connected');
+    (audioData: ArrayBuffer) => {
+      if (!socket) {
+        console.warn('Cannot send audio: socket not available');
         return;
       }
 
-      audioData
-        .arrayBuffer()
-        .then((buffer) => {
-          socket.emit('deepgram_audio', buffer);
-        })
-        .catch((err) => {
-          console.error('Error converting audio blob:', err);
-        });
+      socket.emit('deepgram_audio', audioData);
     },
-    [socket, isConnected]
+    [socket]
   );
 
   const clearTranscript = useCallback(() => {
@@ -221,23 +214,8 @@ export function useDeepgramTranscriptProxy(
     []
   );
 
-  // Listen for transcript updates from the server (processed Deepgram results)
-  useEffect(() => {
-    if (!socket) return;
-
-    const handleTranscriptUpdate = (entry: TranscriptEntry) => {
-      console.log('Transcript update from proxy:', entry);
-      if (onTranscriptUpdateRef.current) {
-        onTranscriptUpdateRef.current(entry);
-      }
-    };
-
-    socket.on('transcript_update', handleTranscriptUpdate);
-
-    return () => {
-      socket.off('transcript_update', handleTranscriptUpdate);
-    };
-  }, [socket]);
+  // Note: We don't listen for transcript_update here to avoid duplicates
+  // The AudioShell component handles transcript_update events directly
 
   return {
     connect,
