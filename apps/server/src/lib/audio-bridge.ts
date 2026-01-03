@@ -106,12 +106,6 @@ export function resample16kTo8k(input: Buffer): Buffer {
   return output;
 }
 
-export function deepgramToTwilio(linear16_16k: Buffer): string {
-  const linear16_8k = resample16kTo8k(linear16_16k);
-  const mulaw = linear16ToMulaw(linear16_8k);
-  return mulaw.toString('base64');
-}
-
 export interface AudioBridge {
   streamSid: string;
   callSid: string;
