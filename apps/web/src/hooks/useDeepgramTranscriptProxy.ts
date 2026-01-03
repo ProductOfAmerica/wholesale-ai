@@ -10,6 +10,20 @@ interface DeepgramConfig {
   sampleRate: number;
 }
 
+interface DeepgramMessage {
+  type: string;
+  channel?: { alternatives?: { transcript?: string }[] };
+  is_final?: boolean;
+  data?: { speaker?: number; turn_id?: string };
+}
+
+interface DeepgramHandlers {
+  handleConnected: (resolve?: () => void) => void;
+  handleError: (errorData: { error: string }, reject?: (error: Error) => void) => void;
+  handleDisconnected: (data: { code: number; reason: string }) => void;
+  handleMessage: (message: DeepgramMessage) => void;
+}
+
 interface DeepgramTranscriptProxy {
   connect: () => Promise<void>;
   disconnect: () => void;
@@ -22,6 +36,61 @@ interface DeepgramTranscriptProxy {
   turnId: string | null;
   clearTranscript: () => void;
   setOnTranscriptUpdate: (callback: (entry: TranscriptEntry) => void) => void;
+}
+
+// Helper functions for Deepgram connection
+function processTranscriptResult(message: DeepgramMessage): {
+  transcript?: string;
+  isFinal: boolean;
+} {
+  if (message.type !== 'Results') return { isFinal: false };
+  
+  const transcript = message.channel?.alternatives?.[0]?.transcript;
+  if (!transcript) return { isFinal: false };
+  
+  return {
+    transcript,
+    isFinal: message.is_final || false,
+  };
+}
+
+function processTurnInfo(message: DeepgramMessage): {
+  speaker?: number;
+  turnId?: string;
+} {
+  if (message.type !== 'TurnInfo') return {};
+  
+  return {
+    speaker: message.data?.speaker,
+    turnId: message.data?.turn_id,
+  };
+}
+
+function setupDeepgramConnection(
+  socket: Socket,
+  config: DeepgramConfig,
+  handlers: DeepgramHandlers,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    // Set up event listeners
+    socket.once('deepgram_connected', () => handlers.handleConnected(resolve));
+    socket.on('deepgram_error', (errorData: { error: string }) => 
+      handlers.handleError(errorData, reject));
+    socket.on('deepgram_disconnected', handlers.handleDisconnected);
+    socket.on('deepgram_message', handlers.handleMessage);
+
+    // Start connection
+    socket.emit('deepgram_connect', {
+      model: config.model,
+      encoding: config.encoding,
+      sampleRate: config.sampleRate,
+    });
+
+    // Timeout after 10 seconds
+    setTimeout(() => {
+      reject(new Error('Connection timeout'));
+    }, 10000);
+  });
 }
 
 export function useDeepgramTranscriptProxy(
@@ -38,79 +107,66 @@ export function useDeepgramTranscriptProxy(
     ((entry: TranscriptEntry) => void) | null
   >(null);
 
+  const createDeepgramHandlers = useCallback((): DeepgramHandlers => {
+    const handleConnected = (resolve?: () => void) => {
+      console.log('Deepgram connected via proxy');
+      setIsConnected(true);
+      resolve?.();
+    };
+
+    const handleError = (errorData: { error: string }, reject?: (error: Error) => void) => {
+      console.error('Deepgram proxy error:', errorData.error);
+      setError(errorData.error);
+      setIsConnected(false);
+      reject?.(new Error(errorData.error));
+    };
+
+    const handleDisconnected = (data: { code: number; reason: string }) => {
+      console.log('Deepgram disconnected via proxy:', data.code, data.reason);
+      setIsConnected(false);
+    };
+
+    const handleMessage = (message: DeepgramMessage) => {
+      console.log('Deepgram message via proxy:', message.type);
+
+      const transcriptResult = processTranscriptResult(message);
+      if (transcriptResult.transcript) {
+        if (transcriptResult.isFinal) {
+          setFinalTranscript(transcriptResult.transcript);
+          setTranscript('');
+        } else {
+          setTranscript(transcriptResult.transcript);
+        }
+      }
+
+      const turnInfo = processTurnInfo(message);
+      if (turnInfo.speaker !== undefined) {
+        setCurrentSpeaker(turnInfo.speaker || null);
+      }
+      if (turnInfo.turnId !== undefined) {
+        setTurnId(turnInfo.turnId || null);
+      }
+    };
+
+    return {
+      handleConnected,
+      handleError,
+      handleDisconnected,
+      handleMessage,
+    };
+  }, []);
+
   const connect = useCallback(async (): Promise<void> => {
     if (!socket) {
       throw new Error('Socket not available');
     }
 
-    return new Promise((resolve, reject) => {
-      console.log('Connecting to Deepgram via Socket.io proxy...');
+    console.log('Connecting to Deepgram via Socket.io proxy...');
+    setError(null);
 
-      setError(null);
-
-      // Set up event listeners
-      const handleConnected = () => {
-        console.log('Deepgram connected via proxy');
-        setIsConnected(true);
-        resolve();
-      };
-
-      const handleError = (errorData: { error: string }) => {
-        console.error('Deepgram proxy error:', errorData.error);
-        setError(errorData.error);
-        setIsConnected(false);
-        reject(new Error(errorData.error));
-      };
-
-      const handleDisconnected = (data: { code: number; reason: string }) => {
-        console.log('Deepgram disconnected via proxy:', data.code, data.reason);
-        setIsConnected(false);
-      };
-
-      const handleMessage = (message: {
-        type: string;
-        channel?: { alternatives?: { transcript?: string }[] };
-        is_final?: boolean;
-        data?: { speaker?: number; turn_id?: string };
-      }) => {
-        console.log('Deepgram message via proxy:', message.type);
-
-        if (message.type === 'Results') {
-          const transcript = message.channel?.alternatives?.[0]?.transcript;
-          if (transcript) {
-            if (message.is_final) {
-              setFinalTranscript(transcript);
-              setTranscript('');
-            } else {
-              setTranscript(transcript);
-            }
-          }
-        } else if (message.type === 'TurnInfo') {
-          setCurrentSpeaker(message.data?.speaker || null);
-          setTurnId(message.data?.turn_id || null);
-        }
-      };
-
-      socket.once('deepgram_connected', handleConnected);
-      socket.on('deepgram_error', handleError);
-      socket.on('deepgram_disconnected', handleDisconnected);
-      socket.on('deepgram_message', handleMessage);
-
-      // Start connection
-      socket.emit('deepgram_connect', {
-        model: config.model,
-        encoding: config.encoding,
-        sampleRate: config.sampleRate,
-      });
-
-      // Timeout after 10 seconds
-      setTimeout(() => {
-        if (!isConnected) {
-          reject(new Error('Connection timeout'));
-        }
-      }, 10000);
-    });
-  }, [socket, config, isConnected]);
+    const handlers = createDeepgramHandlers();
+    return setupDeepgramConnection(socket, config, handlers);
+  }, [socket, config, createDeepgramHandlers]);
 
   const disconnect = useCallback(() => {
     if (socket && isConnected) {

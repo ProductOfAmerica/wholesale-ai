@@ -1,16 +1,15 @@
+import { unstable_cache } from 'next/cache';
 import { NextResponse } from 'next/server';
 
-export async function POST() {
-  const deepgramApiKey = process.env.DEEPGRAM_API_KEY;
+// Cached token generation function
+const getCachedToken = unstable_cache(
+  async () => {
+    const deepgramApiKey = process.env.DEEPGRAM_API_KEY;
 
-  if (!deepgramApiKey) {
-    return NextResponse.json(
-      { error: 'Deepgram API key not configured' },
-      { status: 500 },
-    );
-  }
+    if (!deepgramApiKey) {
+      throw new Error('Deepgram API key not configured');
+    }
 
-  try {
     // Generate a temporary token using Deepgram's token API
     const response = await fetch('https://api.deepgram.com/v1/auth/tokens', {
       method: 'POST',
@@ -25,21 +24,26 @@ export async function POST() {
 
     if (!response.ok) {
       const errorText = await response.text();
-      return NextResponse.json(
-        {
-          error: 'Failed to generate Deepgram token',
-          status: response.status,
-          details: errorText,
-        },
-        { status: 400 },
-      );
+      throw new Error(`Failed to generate Deepgram token: ${errorText}`);
     }
 
     const tokenData = await response.json();
-    return NextResponse.json({
+    return {
       token: tokenData.token,
       expires_in_seconds: tokenData.expires_in_seconds,
-    });
+    };
+  },
+  ['deepgram-token'],
+  {
+    revalidate: 240, // Cache for 4 minutes (20 seconds before token expires)
+    tags: ['deepgram-token'],
+  },
+);
+
+export async function POST() {
+  try {
+    const tokenData = await getCachedToken();
+    return NextResponse.json(tokenData);
   } catch (error) {
     return NextResponse.json(
       {

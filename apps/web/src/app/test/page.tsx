@@ -1,4 +1,5 @@
 import type { AISuggestion, TranscriptEntry } from '@wholesale-ai/shared';
+import { cacheLife, cacheTag } from 'next/cache';
 import { AISuggestions } from '@/components/AISuggestions';
 import { LiveTranscript } from '@/components/LiveTranscript';
 import { MotivationGauge } from '@/components/MotivationGauge';
@@ -6,6 +7,8 @@ import { MotivationGauge } from '@/components/MotivationGauge';
 // Static test data cached at build time
 async function getTestData() {
   'use cache';
+  cacheLife('hours');
+  cacheTag('test-data');
 
   return {
     transcript: [

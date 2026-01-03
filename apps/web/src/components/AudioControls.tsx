@@ -2,6 +2,58 @@
 
 import { useCallback, useState } from 'react';
 
+// Styling utility functions
+function getRecordingButtonStyles(isRecording: boolean, hasError: boolean): string {
+  const baseStyles = `
+    relative flex items-center justify-center w-12 h-12 rounded-full
+    transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2
+    text-white
+  `;
+  
+  const recordingStyles = isRecording
+    ? 'bg-red-500 hover:bg-red-600 focus:ring-red-500 animate-pulse'
+    : 'bg-blue-500 hover:bg-blue-600 focus:ring-blue-500';
+    
+  const errorStyles = hasError ? 'opacity-50 cursor-not-allowed' : '';
+  
+  return `${baseStyles} ${recordingStyles} ${errorStyles}`;
+}
+
+function getMuteButtonStyles(isMuted: boolean, isRecording: boolean): string {
+  const baseStyles = `
+    flex items-center justify-center w-10 h-10 rounded-full
+    transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2
+    text-gray-700
+  `;
+  
+  const muteStyles = isMuted
+    ? 'bg-gray-500 hover:bg-gray-600 focus:ring-gray-500'
+    : 'bg-gray-300 hover:bg-gray-400 focus:ring-gray-500';
+    
+  const disabledStyles = !isRecording ? 'opacity-50 cursor-not-allowed' : '';
+  
+  return `${baseStyles} ${muteStyles} ${disabledStyles}`;
+}
+
+function getAudioLevelColor(audioLevel: number): string {
+  if (audioLevel > 0.8) return 'bg-red-500';
+  if (audioLevel > 0.5) return 'bg-yellow-500';
+  return 'bg-green-500';
+}
+
+function getConnectionStatusStyles(isConnected: boolean): {
+  dotStyles: string;
+  textStyles: string;
+} {
+  return {
+    dotStyles: `
+      w-2 h-2 rounded-full
+      ${isConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}
+    `,
+    textStyles: `text-sm ${isConnected ? 'text-green-600' : 'text-red-600'}`,
+  };
+}
+
 interface AudioControlsProps {
   isRecording: boolean;
   isConnected: boolean;
@@ -43,17 +95,7 @@ export function AudioControls({
           type="button"
           onClick={handleToggleRecording}
           disabled={!!error}
-          className={`
-            relative flex items-center justify-center w-12 h-12 rounded-full
-            transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2
-            ${
-              isRecording
-                ? 'bg-red-500 hover:bg-red-600 focus:ring-red-500 animate-pulse'
-                : 'bg-blue-500 hover:bg-blue-600 focus:ring-blue-500'
-            }
-            ${error ? 'opacity-50 cursor-not-allowed' : ''}
-            text-white
-          `}
+          className={getRecordingButtonStyles(isRecording, !!error)}
           aria-label={isRecording ? 'Stop Recording' : 'Start Recording'}
           title={isRecording ? 'Stop Recording' : 'Start Recording'}
         >
@@ -83,17 +125,7 @@ export function AudioControls({
           type="button"
           onClick={handleToggleMute}
           disabled={!isRecording}
-          className={`
-            flex items-center justify-center w-10 h-10 rounded-full
-            transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2
-            ${
-              isMuted
-                ? 'bg-gray-500 hover:bg-gray-600 focus:ring-gray-500'
-                : 'bg-gray-300 hover:bg-gray-400 focus:ring-gray-500'
-            }
-            ${!isRecording ? 'opacity-50 cursor-not-allowed' : ''}
-            text-gray-700
-          `}
+          className={getMuteButtonStyles(isMuted, isRecording)}
           aria-label={isMuted ? 'Unmute' : 'Mute'}
           title={isMuted ? 'Unmute' : 'Mute'}
         >
@@ -135,16 +167,7 @@ export function AudioControls({
           <span className="text-sm text-gray-600">Level:</span>
           <div className="w-24 h-2 bg-gray-200 rounded-full overflow-hidden">
             <div
-              className={`
-                h-full transition-all duration-150 rounded-full
-                ${
-                  audioLevel > 0.8
-                    ? 'bg-red-500'
-                    : audioLevel > 0.5
-                      ? 'bg-yellow-500'
-                      : 'bg-green-500'
-                }
-              `}
+              className={`h-full transition-all duration-150 rounded-full ${getAudioLevelColor(audioLevel)}`}
               style={{ width: `${Math.min(audioLevel * 100, 100)}%` }}
             />
           </div>
@@ -155,16 +178,8 @@ export function AudioControls({
 
         {/* Connection Status */}
         <div className="flex items-center gap-2">
-          <div
-            className={`
-            w-2 h-2 rounded-full
-            ${isConnected ? 'bg-green-500' : 'bg-red-500'}
-            ${isConnected ? 'animate-pulse' : ''}
-          `}
-          />
-          <span
-            className={`text-sm ${isConnected ? 'text-green-600' : 'text-red-600'}`}
-          >
+          <div className={getConnectionStatusStyles(isConnected).dotStyles} />
+          <span className={getConnectionStatusStyles(isConnected).textStyles}>
             {isConnected ? 'Connected' : 'Disconnected'}
           </span>
         </div>

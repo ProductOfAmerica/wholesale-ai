@@ -1,7 +1,7 @@
 ---
 description: Audit app/ directory for Next.js rendering and caching issues
 allowed-tools: mcp__context7__*
-argument-hint: [ path ]
+argument-hint: [path]
 ---
 
 ## Step 1: Fetch Next.js Documentation

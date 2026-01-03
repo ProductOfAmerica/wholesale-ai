@@ -31,6 +31,195 @@ const conversationHistory = new Map<string, TranscriptEntry[]>();
 // Store Deepgram WebSocket connections per socket
 const deepgramConnections = new Map<string, WebSocket>();
 
+// Helper functions for message processing
+function parseDeepgramMessage(data: Buffer): any | null {
+  try {
+    return JSON.parse(data.toString());
+  } catch (error) {
+    console.error('Error parsing Deepgram message:', error);
+    return null;
+  }
+}
+
+function extractTranscript(message: any): string | null {
+  if (
+    message.type === 'Results' &&
+    message.channel?.alternatives?.[0]?.transcript
+  ) {
+    const transcript = message.channel.alternatives[0].transcript.trim();
+    return transcript || null;
+  }
+  return null;
+}
+
+function createTranscriptEntry(
+  speaker: string,
+  text: string,
+): TranscriptEntry {
+  return {
+    speaker,
+    text,
+    timestamp: Date.now(),
+  };
+}
+
+function updateConversationHistory(
+  socketId: string,
+  transcriptEntry: TranscriptEntry,
+): TranscriptEntry[] {
+  const history = conversationHistory.get(socketId) || [];
+  history.push(transcriptEntry);
+  conversationHistory.set(socketId, history);
+  return history;
+}
+
+async function runAIAnalysis(
+  socketId: string,
+  history: TranscriptEntry[],
+  transcript: string,
+): Promise<void> {
+  if (history.length === 0) return;
+
+  try {
+    console.log('Running AI analysis...');
+    const analysisResult = await analyzeConversation(history, transcript);
+    console.log('AI Analysis Result:', analysisResult);
+    
+    const socket = io.sockets.sockets.get(socketId);
+    socket?.emit('ai_suggestion', analysisResult);
+  } catch (error) {
+    console.error('AI Analysis failed:', error);
+    
+    const fallbackSuggestion: AISuggestion = {
+      motivation_level: 5,
+      pain_points: [],
+      objection_detected: false,
+      suggested_response: 'Continue the conversation.',
+      recommended_next_move: 'Ask follow-up questions.',
+      error: 'AI analysis temporarily unavailable',
+    };
+    
+    const socket = io.sockets.sockets.get(socketId);
+    socket?.emit('ai_suggestion', fallbackSuggestion);
+  }
+}
+
+function processTranscript(socketId: string, transcript: string): void {
+  const transcriptEntry = createTranscriptEntry('seller', transcript);
+  const history = updateConversationHistory(socketId, transcriptEntry);
+  
+  const socket = io.sockets.sockets.get(socketId);
+  socket?.emit('transcript_update', transcriptEntry);
+  
+  // Run AI analysis asynchronously
+  runAIAnalysis(socketId, history, transcript);
+}
+
+function handleDeepgramMessage(socketId: string, data: Buffer): void {
+  const message = parseDeepgramMessage(data);
+  if (!message) return;
+  
+  console.log(`Deepgram message for ${socketId}:`, message.type);
+  
+  // Forward Deepgram messages to client
+  const socket = io.sockets.sockets.get(socketId);
+  socket?.emit('deepgram_message', message);
+  
+  // Process transcript if available
+  const transcript = extractTranscript(message);
+  if (transcript) {
+    processTranscript(socketId, transcript);
+  }
+}
+
+// Demo conversation utilities
+interface DemoMessage {
+  speaker: string;
+  text: string;
+}
+
+const demoMessages: DemoMessage[] = [
+  {
+    speaker: 'seller',
+    text: 'Hi, I got your letter about buying my house. What exactly are you offering?',
+  },
+  {
+    speaker: 'user',
+    text: 'Thank you for reaching out! I specialize in helping homeowners who need to sell quickly. Can you tell me about your situation?',
+  },
+  {
+    speaker: 'seller',
+    text: "We've been here 20 years but my wife's health is declining. We need to move closer to family soon.",
+  },
+  {
+    speaker: 'user',
+    text: "I understand completely. Family comes first. What's your ideal timeline for making this move?",
+  },
+  {
+    speaker: 'seller',
+    text: "The house needs some work, I know. The roof is maybe 10 years old and the kitchen hasn't been updated.",
+  },
+  {
+    speaker: 'user',
+    text: 'I appreciate your honesty. I work with properties in all conditions. Would you mind if I took a look to give you an accurate assessment?',
+  },
+  {
+    speaker: 'seller',
+    text: "That seems pretty low compared to what Zillow says it's worth. Can you do better?",
+  },
+];
+
+const delay = (ms: number): Promise<void> => 
+  new Promise(resolve => setTimeout(resolve, ms));
+
+async function processDemoMessage(
+  socketId: string,
+  message: DemoMessage,
+): Promise<void> {
+  const transcriptEntry = createTranscriptEntry(message.speaker, message.text);
+  const history = updateConversationHistory(socketId, transcriptEntry);
+  
+  const socket = io.sockets.sockets.get(socketId);
+  socket?.emit('transcript_update', transcriptEntry);
+  
+  // Run AI analysis for seller messages
+  if (message.speaker === 'seller') {
+    await runAIAnalysis(socketId, history, message.text);
+  }
+}
+
+async function runDemoConversation(socketId: string): Promise<void> {
+  console.log(`Running demo conversation for ${socketId}`);
+  
+  // Clear history and start demo
+  conversationHistory.set(socketId, []);
+  
+  for (const [index, message] of demoMessages.entries()) {
+    if (index > 0) {
+      await delay(3000); // 3 second delays between messages
+    }
+    await processDemoMessage(socketId, message);
+  }
+}
+
+async function processSimulatedSpeech(
+  socketId: string,
+  data: { speaker: string; text: string },
+): Promise<void> {
+  console.log('Simulated speech:', data);
+  
+  const transcriptEntry = createTranscriptEntry(data.speaker, data.text);
+  const history = updateConversationHistory(socketId, transcriptEntry);
+  
+  const socket = io.sockets.sockets.get(socketId);
+  socket?.emit('transcript_update', transcriptEntry);
+  
+  // Run AI analysis if it's a seller message and we have context
+  if (data.speaker === 'seller' && history.length > 0) {
+    await runAIAnalysis(socketId, history, data.text);
+  }
+}
+
 // Socket.io event handling
 io.on('connection', (socket) => {
   console.log(`Client connected: ${socket.id}`);
@@ -87,58 +276,7 @@ io.on('connection', (socket) => {
       });
 
       deepgramWS.on('message', (data: Buffer) => {
-        try {
-          const message = JSON.parse(data.toString());
-          console.log(`Deepgram message for ${socket.id}:`, message.type);
-
-          // Forward Deepgram messages to client
-          socket.emit('deepgram_message', message);
-
-          // Convert Deepgram transcription to our format
-          if (
-            message.type === 'Results' &&
-            message.channel?.alternatives?.[0]?.transcript
-          ) {
-            const transcript = message.channel.alternatives[0].transcript;
-            if (transcript.trim()) {
-              const transcriptEntry: TranscriptEntry = {
-                speaker: 'seller', // Assume all audio is from seller for now
-                text: transcript,
-                timestamp: Date.now(),
-              };
-
-              // Add to conversation history
-              const history = conversationHistory.get(socket.id) || [];
-              history.push(transcriptEntry);
-              conversationHistory.set(socket.id, history);
-
-              // Send transcript update to client
-              socket.emit('transcript_update', transcriptEntry);
-
-              // Run AI analysis
-              if (history.length > 0) {
-                analyzeConversation(history, transcript)
-                  .then((analysisResult) => {
-                    console.log('AI Analysis Result:', analysisResult);
-                    socket.emit('ai_suggestion', analysisResult);
-                  })
-                  .catch((error) => {
-                    console.error('AI Analysis failed:', error);
-                    socket.emit('ai_suggestion', {
-                      motivation_level: 5,
-                      pain_points: [],
-                      objection_detected: false,
-                      suggested_response: 'Continue the conversation.',
-                      recommended_next_move: 'Ask follow-up questions.',
-                      error: 'AI analysis temporarily unavailable',
-                    });
-                  });
-              }
-            }
-          }
-        } catch (error) {
-          console.error('Error parsing Deepgram message:', error);
-        }
+        handleDeepgramMessage(socket.id, data);
       });
 
       deepgramWS.on('error', (error: Error) => {
@@ -174,118 +312,14 @@ io.on('connection', (socket) => {
   // Handle text simulation for testing
   socket.on(
     'simulate_speech',
-    async (data: { speaker: string; text: string }) => {
-      console.log('Simulated speech:', data);
-
-      const transcriptEntry: TranscriptEntry = {
-        speaker: data.speaker,
-        text: data.text,
-        timestamp: Date.now(),
-      };
-
-      // Add to conversation history
-      const history = conversationHistory.get(socket.id) || [];
-      history.push(transcriptEntry);
-      conversationHistory.set(socket.id, history);
-
-      // Echo back as transcript_update
-      socket.emit('transcript_update', transcriptEntry);
-
-      // Run AI analysis if we have enough context (and it's a seller message)
-      if (data.speaker === 'seller' && history.length > 0) {
-        try {
-          console.log('Running AI analysis...');
-          const analysisResult = await analyzeConversation(history, data.text);
-          console.log('AI Analysis Result:', analysisResult);
-
-          socket.emit('ai_suggestion', analysisResult);
-        } catch (error) {
-          console.error('AI Analysis failed:', error);
-
-          // Send fallback suggestion
-          const fallbackSuggestion: AISuggestion = {
-            motivation_level: 5,
-            pain_points: [],
-            objection_detected: false,
-            suggested_response: 'Continue building rapport with the seller.',
-            recommended_next_move:
-              'Ask follow-up questions to understand their needs.',
-            error: 'AI analysis temporarily unavailable',
-          };
-
-          socket.emit('ai_suggestion', fallbackSuggestion);
-        }
-      }
+    (data: { speaker: string; text: string }) => {
+      processSimulatedSpeech(socket.id, data);
     },
   );
 
   // Handle demo conversation
-  socket.on('run_demo', async () => {
-    console.log(`Running demo conversation for ${socket.id}`);
-
-    const demoMessages = [
-      {
-        speaker: 'seller',
-        text: 'Hi, I got your letter about buying my house. What exactly are you offering?',
-      },
-      {
-        speaker: 'user',
-        text: 'Thank you for reaching out! I specialize in helping homeowners who need to sell quickly. Can you tell me about your situation?',
-      },
-      {
-        speaker: 'seller',
-        text: "We've been here 20 years but my wife's health is declining. We need to move closer to family soon.",
-      },
-      {
-        speaker: 'user',
-        text: "I understand completely. Family comes first. What's your ideal timeline for making this move?",
-      },
-      {
-        speaker: 'seller',
-        text: "The house needs some work, I know. The roof is maybe 10 years old and the kitchen hasn't been updated.",
-      },
-      {
-        speaker: 'user',
-        text: 'I appreciate your honesty. I work with properties in all conditions. Would you mind if I took a look to give you an accurate assessment?',
-      },
-      {
-        speaker: 'seller',
-        text: "That seems pretty low compared to what Zillow says it's worth. Can you do better?",
-      },
-    ];
-
-    // Clear history and play demo
-    conversationHistory.set(socket.id, []);
-
-    for (let i = 0; i < demoMessages.length; i++) {
-      setTimeout(async () => {
-        const message = demoMessages[i];
-        const transcriptEntry: TranscriptEntry = {
-          speaker: message.speaker,
-          text: message.text,
-          timestamp: Date.now(),
-        };
-
-        const history = conversationHistory.get(socket.id) || [];
-        history.push(transcriptEntry);
-        conversationHistory.set(socket.id, history);
-
-        socket.emit('transcript_update', transcriptEntry);
-
-        // Run AI analysis for seller messages
-        if (message.speaker === 'seller') {
-          try {
-            const analysisResult = await analyzeConversation(
-              history,
-              message.text,
-            );
-            socket.emit('ai_suggestion', analysisResult);
-          } catch (error) {
-            console.error('Demo AI Analysis failed:', error);
-          }
-        }
-      }, i * 3000); // 3 second delays
-    }
+  socket.on('run_demo', () => {
+    runDemoConversation(socket.id);
   });
 
   socket.on('disconnect', (reason) => {

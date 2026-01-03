@@ -1,14 +1,14 @@
 import { NextResponse } from 'next/server';
 
 export async function GET() {
-  const deepgramApiKey = process.env.DEEPGRAM_API_KEY;
-
-  if (!deepgramApiKey) {
-    return NextResponse.json(
-      { error: 'Deepgram API key not configured' },
-      { status: 500 },
-    );
-  }
-
-  return NextResponse.json({ apiKey: deepgramApiKey });
+  // Security fix: Remove direct API key exposure
+  // Use the token endpoint instead for secure access
+  return NextResponse.json(
+    {
+      error: 'Direct API key access removed for security',
+      recommendation:
+        'Use /api/deepgram-token endpoint for secure token-based access',
+    },
+    { status: 403 },
+  );
 }
