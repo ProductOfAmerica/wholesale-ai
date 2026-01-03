@@ -25,3 +25,13 @@ export interface AnalysisResult {
   recommended_next_move: string;
   error?: string;
 }
+
+export interface CallSummary {
+  duration: number;
+  final_motivation_level: number;
+  pain_points: string[];
+  objections: string[];
+  summary: string;
+  next_steps: string;
+  error?: string;
+}

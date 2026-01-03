@@ -23,7 +23,9 @@
       "Bash(curl:*)",
       "mcp__playwright__browser_console_messages",
       "mcp__next-devtools-mcp__nextjs_index",
-      "mcp__next-devtools-mcp__nextjs_call"
+      "mcp__next-devtools-mcp__nextjs_call",
+      "mcp__playwright__browser_wait_for",
+      "Bash(npx shadcn@latest add:*)"
     ],
     "deny": [],
     "ask": []

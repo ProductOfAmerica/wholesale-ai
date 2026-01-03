@@ -17,7 +17,7 @@ export function LiveTranscript({ transcript }: LiveTranscriptProps) {
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
     transcriptEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, []);
+  }, [transcript]);
 
   return (
     <Card>

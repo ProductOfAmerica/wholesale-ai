@@ -21,7 +21,7 @@
     },
     "@wholesale-ai/server#build": {
       "dependsOn": ["^build"],
-      "env": ["ANTHROPIC_API_KEY", "DEEPGRAM_API_KEY", "FRONTEND_URL", "PORT"],
+      "env": ["ANTHROPIC_API_KEY", "DEEPGRAM_API_KEY", "FRONTEND_URL", "PORT", "SERVER_URL", "TWILIO_API_KEY_SID", "TWILIO_API_KEY_SECRET", "TWILIO_TWIML_APP_SID"],
       "inputs": [
         "$TURBO_DEFAULT$",
         ".env.production.local",
@@ -32,6 +32,10 @@
       "outputs": ["dist/**"]
     },
     "dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "dev:tunnel": {
       "cache": false,
       "persistent": true
     },
@@ -50,7 +54,7 @@
     "@wholesale-ai/server#dev": {
       "cache": false,
       "persistent": true,
-      "env": ["ANTHROPIC_API_KEY", "DEEPGRAM_API_KEY", "FRONTEND_URL", "PORT"],
+      "env": ["ANTHROPIC_API_KEY", "DEEPGRAM_API_KEY", "FRONTEND_URL", "PORT", "SERVER_URL", "TWILIO_API_KEY_SID", "TWILIO_API_KEY_SECRET", "TWILIO_TWIML_APP_SID"],
       "inputs": [
         "$TURBO_DEFAULT$",
         ".env.development.local",

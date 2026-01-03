@@ -12,7 +12,6 @@ export const metadata: Metadata = {
     'Real-time AI-powered negotiation assistance for wholesale buyers',
 };
 
-// Cached navigation component
 async function Navigation() {
   'use cache';
   cacheLife('max');
@@ -24,14 +23,8 @@ async function Navigation() {
           Wholesale AI Copilot
         </Link>
         <div className="flex gap-2">
-          <Button variant="ghost" asChild>
-            <Link href="/call">Text Simulation</Link>
-          </Button>
-          <Button variant="ghost" asChild>
-            <Link href="/call/real-audio">🎙️ Real Audio</Link>
-          </Button>
-          <Button variant="ghost" asChild>
-            <Link href="/test">Test Page</Link>
+          <Button variant="default" asChild>
+            <Link href="/call">Make a Call</Link>
           </Button>
         </div>
       </div>

@@ -1,15 +1,15 @@
 'use client';
 
-import type { AISuggestion, TranscriptEntry } from '@wholesale-ai/shared';
-import { Suspense, useCallback, useEffect, useState } from 'react';
-import { io, type Socket } from 'socket.io-client';
-import { AISuggestions } from '@/components/AISuggestions';
-import { AudioControls } from '@/components/AudioControls';
-import { AudioLevelBars, AudioVisualizer } from '@/components/AudioVisualizer';
-import { LiveTranscript } from '@/components/LiveTranscript';
-import { MotivationGauge } from '@/components/MotivationGauge';
-import { useAudioStream } from '@/hooks/useAudioStream';
-import { useDeepgramTranscriptProxy } from '@/hooks/useDeepgramTranscriptProxy';
+import type {AISuggestion, TranscriptEntry} from '@wholesale-ai/shared';
+import {Suspense, useCallback, useEffect, useState} from 'react';
+import {AISuggestions} from '@/components/AISuggestions';
+import {AudioControls} from '@/components/AudioControls';
+import {AudioLevelBars, AudioVisualizer} from '@/components/AudioVisualizer';
+import {LiveTranscript} from '@/components/LiveTranscript';
+import {MotivationGauge} from '@/components/MotivationGauge';
+import {useAudioStream} from '@/hooks/useAudioStream';
+import {useDeepgramTranscriptProxy} from '@/hooks/useDeepgramTranscriptProxy';
+import {useSocket} from '@/hooks/useSocket';
 
 // Environment warning components
 function WarningIcon() {
@@ -62,8 +62,7 @@ function EnvironmentWarning({ show }: { show: boolean }) {
 }
 
 export function AudioShell() {
-  const [socket, setSocket] = useState<Socket | null>(null);
-  const [connected, setConnected] = useState(false);
+  const { socket, connected } = useSocket();
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
   const [currentSuggestion, setCurrentSuggestion] =
     useState<AISuggestion | null>(null);
@@ -85,28 +84,14 @@ export function AudioShell() {
     sampleRate: 16000,
   });
 
-  // Socket.io connection
   useEffect(() => {
-    const socketUrl =
-      process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3001';
-    const socketInstance = io(socketUrl);
-    setSocket(socketInstance);
+    if (!socket) return;
 
-    socketInstance.on('connect', () => {
-      console.log('Connected to server');
-      setConnected(true);
-    });
-
-    socketInstance.on('disconnect', () => {
-      console.log('Disconnected from server');
-      setConnected(false);
-    });
-
-    socketInstance.on('connection_ready', () => {
+    socket.on('connection_ready', () => {
       console.log('Call connection ready');
     });
 
-    socketInstance.on('transcript_update', (data: TranscriptEntry) => {
+    socket.on('transcript_update', (data: TranscriptEntry) => {
       console.log('Transcript update from server:', data);
       setTranscript((prev) => [...prev, data]);
 
@@ -115,16 +100,18 @@ export function AudioShell() {
       }
     });
 
-    socketInstance.on('ai_suggestion', (data: AISuggestion) => {
+    socket.on('ai_suggestion', (data: AISuggestion) => {
       console.log('AI suggestion:', data);
       setCurrentSuggestion(data);
       setAiLoading(false);
     });
 
     return () => {
-      socketInstance.disconnect();
+      socket.off('connection_ready');
+      socket.off('transcript_update');
+      socket.off('ai_suggestion');
     };
-  }, []);
+  }, [socket]);
 
   // Handle Deepgram transcripts - only send to server, don't add locally (avoid duplicates)
   useEffect(() => {
@@ -212,12 +199,10 @@ export function AudioShell() {
   }, [isCallActive, handleEndCall]);
 
   // Environment check - now we just need Socket.io connection
-  const hasRequiredEnvVars = connected;
-
   return (
     <>
       {/* Environment Warning */}
-      <EnvironmentWarning show={!hasRequiredEnvVars} />
+      <EnvironmentWarning show={!connected} />
 
       {/* Connection Status */}
       <div className="mb-6 p-4 bg-gray-50 rounded-lg border border-gray-200">

@@ -207,14 +207,14 @@ DEEPGRAM_API_KEY=your_deepgram_api_key
 TWILIO_ACCOUNT_SID=your_twilio_account_sid
 TWILIO_AUTH_TOKEN=your_twilio_auth_token
 ANTHROPIC_API_KEY=your_anthropic_api_key
-DEEPGRAM_FLUX_MODEL=nova-2-conversationalai
+DEEPGRAM_FLUX_MODEL=flux-general-en
 AUDIO_SAMPLE_RATE=16000
 ```
 
 ## 🔧 Implementation Notes
 
 ### Deepgram Flux Configuration
-- Model: `nova-2-conversationalai` (optimized for real-time)
+- Model: `flux-general-en` (optimized for real-time)
 - Features: Smart formatting, punctuation, speaker diarization
 - Language: `en-US`
 - Sample rate: 16kHz for optimal quality/performance

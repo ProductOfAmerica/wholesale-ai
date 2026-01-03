@@ -1,31 +1,35 @@
+import type { IncomingMessage } from 'node:http';
 import { createServer } from 'node:http';
 import type { AISuggestion, TranscriptEntry } from '@wholesale-ai/shared';
 import { config } from 'dotenv';
 import { Server } from 'socket.io';
-import { WebSocket } from 'ws';
+import { WebSocket, WebSocketServer } from 'ws';
 
-import { analyzeConversation } from './lib/ai-analysis.js';
+import { analyzeConversation, clearConversationContext, generateCallSummary, streamSuggestedResponse, updateConversationContext } from './lib/ai-analysis.js';
+import {
+  createAudioBridge,
+  getAllBridges,
+  removeAudioBridge,
+  sendAudioToTwilio,
+  twilioToDeepgram,
+} from './lib/audio-bridge.js';
+import { endCall, initiateOutboundCall } from './lib/twilio-service.js';
+import { createTwilioRouter } from './lib/twilio-webhooks.js';
 
 config({ path: '.env.local' });
 
 const port = parseInt(process.env.PORT || '3001', 10);
 const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-
-const httpServer = createServer();
-
-const io = new Server(httpServer, {
-  cors: {
-    origin: [frontendUrl, 'http://localhost:3000'],
-    credentials: true,
-  },
-  transports: ['websocket', 'polling'],
-  pingTimeout: 60000,
-  pingInterval: 25000,
-});
+const serverUrl = process.env.SERVER_URL || `http://localhost:${port}`;
 
 const conversationHistory = new Map<string, TranscriptEntry[]>();
-
 const deepgramConnections = new Map<string, WebSocket>();
+const deepgramConnectionsOutbound = new Map<string, WebSocket>();
+const activeCallSids = new Map<string, string>();
+const pendingAudioBuffers = new Map<string, Buffer[]>();
+const pendingAudioBuffersOutbound = new Map<string, Buffer[]>();
+const deepgramReady = new Map<string, boolean>();
+const deepgramReadyOutbound = new Map<string, boolean>();
 
 interface FluxTurnInfo {
   type: 'TurnInfo' | 'Connected';
@@ -90,13 +94,34 @@ async function runAIAnalysis(
 ): Promise<void> {
   if (history.length === 0) return;
 
-  try {
-    console.log('Running AI analysis...');
-    const analysisResult = await analyzeConversation(history, transcript);
-    console.log('AI Analysis Result:', analysisResult);
+  const socket = io.sockets.sockets.get(socketId);
+  if (!socket) return;
 
-    const socket = io.sockets.sockets.get(socketId);
-    socket?.emit('ai_suggestion', analysisResult);
+  try {
+    console.log('Starting streaming AI response...');
+    
+    socket.emit('ai_suggestion_start');
+
+    const fullResponse = await streamSuggestedResponse(
+      history,
+      transcript,
+      (token) => {
+        socket.emit('ai_suggestion_token', token);
+      },
+      socketId
+    );
+
+    socket.emit('ai_suggestion_end', { suggested_response: fullResponse });
+
+    analyzeConversation(history, transcript).then((analysisResult) => {
+      socket.emit('ai_suggestion', {
+        ...analysisResult,
+        suggested_response: fullResponse,
+      });
+    }).catch(console.error);
+
+    updateConversationContext(socketId, history).catch(console.error);
+
   } catch (error) {
     console.error('AI Analysis failed:', error);
 
@@ -109,43 +134,40 @@ async function runAIAnalysis(
       error: 'AI analysis temporarily unavailable',
     };
 
-    const socket = io.sockets.sockets.get(socketId);
-    socket?.emit('ai_suggestion', fallbackSuggestion);
+    socket.emit('ai_suggestion', fallbackSuggestion);
   }
 }
 
-function processTranscript(socketId: string, transcript: string): void {
-  const transcriptEntry = createTranscriptEntry('seller', transcript);
+function processTranscript(socketId: string, transcript: string, speaker: 'seller' | 'user' = 'seller'): void {
+  const transcriptEntry = createTranscriptEntry(speaker, transcript);
   const history = updateConversationHistory(socketId, transcriptEntry);
 
   const socket = io.sockets.sockets.get(socketId);
   socket?.emit('transcript_update', transcriptEntry);
 
-  // Run AI analysis asynchronously
-  runAIAnalysis(socketId, history, transcript);
-}
-
-function handleDeepgramMessage(socketId: string, data: Buffer): void {
-  const message = parseDeepgramMessage(data);
-  if (!message) return;
-
-  console.log(`Deepgram message for ${socketId}:`, message.type, message);
-
-  // Forward Deepgram messages to client
-  const socket = io.sockets.sockets.get(socketId);
-  socket?.emit('deepgram_message', message);
-
-  // Process transcript only on EndOfTurn (final)
-  const transcript = extractTranscript(message);
-  if (transcript && isEndOfTurn(message)) {
-    console.log(`Processing EndOfTurn transcript: "${transcript}"`);
-    processTranscript(socketId, transcript);
-  } else if (transcript) {
-    console.log(`Interim transcript (${message.event}): "${transcript}"`);
+  if (speaker === 'seller') {
+    runAIAnalysis(socketId, history, transcript);
   }
 }
 
-// Demo conversation utilities
+function handleDeepgramMessage(socketId: string, data: Buffer, speaker: 'seller' | 'user'): void {
+  const message = parseDeepgramMessage(data);
+  if (!message) return;
+
+  // console.log(`Deepgram message for ${socketId} (${speaker}):`, message.type, message);
+
+  const socket = io.sockets.sockets.get(socketId);
+  socket?.emit('deepgram_message', message);
+
+  const transcript = extractTranscript(message);
+  if (transcript && isEndOfTurn(message)) {
+    console.log(`Processing EndOfTurn transcript (${speaker}): "${transcript}"`);
+    processTranscript(socketId, transcript, speaker);
+  } else if (transcript) {
+    console.log(`Interim transcript (${speaker}, ${message.event}): "${transcript}"`);
+  }
+}
+
 interface DemoMessage {
   speaker: string;
   text: string;
@@ -195,7 +217,6 @@ async function processDemoMessage(
   const socket = io.sockets.sockets.get(socketId);
   socket?.emit('transcript_update', transcriptEntry);
 
-  // Run AI analysis for seller messages
   if (message.speaker === 'seller') {
     await runAIAnalysis(socketId, history, message.text);
   }
@@ -207,7 +228,19 @@ function closeDeepgramConnection(socketId: string): void {
     deepgramWS.send(JSON.stringify({ type: 'CloseStream' }));
     deepgramWS.close();
     deepgramConnections.delete(socketId);
-    console.log(`Deepgram WebSocket closed for ${socketId}`);
+    deepgramReady.delete(socketId);
+    pendingAudioBuffers.delete(socketId);
+    console.log(`Deepgram WebSocket (inbound) closed for ${socketId}`);
+  }
+
+  const deepgramWSOutbound = deepgramConnectionsOutbound.get(socketId);
+  if (deepgramWSOutbound) {
+    deepgramWSOutbound.send(JSON.stringify({ type: 'CloseStream' }));
+    deepgramWSOutbound.close();
+    deepgramConnectionsOutbound.delete(socketId);
+    deepgramReadyOutbound.delete(socketId);
+    pendingAudioBuffersOutbound.delete(socketId);
+    console.log(`Deepgram WebSocket (outbound) closed for ${socketId}`);
   }
 }
 
@@ -222,7 +255,8 @@ function createDeepgramConnection(
     id: string;
     emit: (event: string, data?: unknown) => void;
   },
-  config: DeepgramConfig
+  config: DeepgramConfig,
+  track: 'inbound' | 'outbound' = 'inbound'
 ): void {
   const apiKey = process.env.DEEPGRAM_API_KEY;
   if (!apiKey) {
@@ -230,45 +264,76 @@ function createDeepgramConnection(
     return;
   }
 
-  console.log(`Starting Deepgram WebSocket for ${socket.id}`, config);
+  const speaker = track === 'inbound' ? 'user' : 'seller';
+  const connectionsMap = track === 'inbound' ? deepgramConnections : deepgramConnectionsOutbound;
+  const readyMap = track === 'inbound' ? deepgramReady : deepgramReadyOutbound;
+  const buffersMap = track === 'inbound' ? pendingAudioBuffers : pendingAudioBuffersOutbound;
 
-  const wsUrl = `wss://api.deepgram.com/v2/listen?model=${config.model}&encoding=${config.encoding}&sample_rate=${config.sampleRate}`;
+  console.log(`Starting Deepgram WebSocket for ${socket.id} (${track}/${speaker})`, config);
+
+  const wsUrl = `wss://api.deepgram.com/v2/listen?model=${config.model}&encoding=${config.encoding}&sample_rate=${config.sampleRate}&eot_threshold=0.7&eot_timeout_ms=5000`;
 
   const deepgramWS = new WebSocket(wsUrl, {
     headers: { Authorization: `token ${apiKey}` },
   });
 
   deepgramWS.on('open', () => {
-    console.log(`Deepgram WebSocket connected for ${socket.id}`);
-    deepgramConnections.set(socket.id, deepgramWS);
-    socket.emit('deepgram_connected');
+    console.log(`Deepgram WebSocket connected for ${socket.id} (${track})`);
+    connectionsMap.set(socket.id, deepgramWS);
+    readyMap.set(socket.id, true);
+    socket.emit('deepgram_connected', { track });
+
+    const buffered = buffersMap.get(socket.id);
+    if (buffered && buffered.length > 0) {
+      console.log(`Flushing ${buffered.length} buffered audio packets to Deepgram (${track})`);
+      for (const audioData of buffered) {
+        deepgramWS.send(audioData);
+      }
+      buffersMap.delete(socket.id);
+    }
   });
 
   deepgramWS.on('message', (data: Buffer) => {
-    handleDeepgramMessage(socket.id, data);
+    handleDeepgramMessage(socket.id, data, speaker);
   });
 
   deepgramWS.on('error', (error: Error) => {
-    console.error(`Deepgram WebSocket error for ${socket.id}:`, error);
-    socket.emit('deepgram_error', { error: error.message });
+    console.error(`Deepgram WebSocket error for ${socket.id} (${track}):`, error);
+    socket.emit('deepgram_error', { error: error.message, track });
   });
 
   deepgramWS.on('close', (code: number, reason: Buffer) => {
     console.log(
-      `Deepgram WebSocket closed for ${socket.id}: ${code} ${reason}`
+      `Deepgram WebSocket closed for ${socket.id} (${track}): ${code} ${reason}`
     );
-    deepgramConnections.delete(socket.id);
-    socket.emit('deepgram_disconnected', { code, reason: reason.toString() });
+    connectionsMap.delete(socket.id);
+    readyMap.delete(socket.id);
+    buffersMap.delete(socket.id);
+    socket.emit('deepgram_disconnected', { code, reason: reason.toString(), track });
   });
 }
 
-function sendAudioToDeepgram(socketId: string, audioData: Buffer): void {
-  const deepgramWS = deepgramConnections.get(socketId);
+function sendAudioToDeepgram(socketId: string, audioData: Buffer, track: 'inbound' | 'outbound' = 'inbound'): void {
+  const connectionsMap = track === 'inbound' ? deepgramConnections : deepgramConnectionsOutbound;
+  const readyMap = track === 'inbound' ? deepgramReady : deepgramReadyOutbound;
+  const buffersMap = track === 'inbound' ? pendingAudioBuffers : pendingAudioBuffersOutbound;
+
+  const deepgramWS = connectionsMap.get(socketId);
   if (deepgramWS && deepgramWS.readyState === WebSocket.OPEN) {
     deepgramWS.send(audioData);
+  } else if (connectionsMap.has(socketId) || readyMap.get(socketId) === false) {
+    let buffer = buffersMap.get(socketId);
+    if (!buffer) {
+      buffer = [];
+      buffersMap.set(socketId, buffer);
+    }
+    buffer.push(audioData);
+    if (buffer.length === 1) {
+      console.log(`Buffering audio for ${socketId} (${track}) until Deepgram connects...`);
+    }
   } else {
     console.warn(
-      `Cannot send audio for ${socketId}: Deepgram WebSocket not connected`
+      `Cannot send audio for ${socketId} (${track}): Deepgram WebSocket not connected`
     );
   }
 }
@@ -276,12 +341,11 @@ function sendAudioToDeepgram(socketId: string, audioData: Buffer): void {
 async function runDemoConversation(socketId: string): Promise<void> {
   console.log(`Running demo conversation for ${socketId}`);
 
-  // Clear history and start demo
   conversationHistory.set(socketId, []);
 
   for (const [index, message] of demoMessages.entries()) {
     if (index > 0) {
-      await delay(3000); // 3 second delays between messages
+      await delay(3000);
     }
     await processDemoMessage(socketId, message);
   }
@@ -299,23 +363,218 @@ async function processSimulatedSpeech(
   const socket = io.sockets.sockets.get(socketId);
   socket?.emit('transcript_update', transcriptEntry);
 
-  // Run AI analysis if it's a seller message and we have context
   if (data.speaker === 'seller' && history.length > 0) {
     await runAIAnalysis(socketId, history, data.text);
   }
 }
 
-// Socket.io event handling
+const httpServer = createServer();
+
+const io = new Server(httpServer, {
+  cors: {
+    origin: [frontendUrl, 'http://localhost:3000'],
+    credentials: true,
+  },
+  transports: ['websocket', 'polling'],
+  pingTimeout: 60000,
+  pingInterval: 25000,
+});
+
+const twilioRouter = createTwilioRouter(io, serverUrl);
+
+const wss = new WebSocketServer({ noServer: true });
+
+httpServer.on('request', async (req, res) => {
+  const url = req.url || '';
+  if (url.startsWith('/socket.io')) {
+    return;
+  }
+
+  if (url === '/health') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ status: 'ok', timestamp: Date.now() }));
+    return;
+  }
+
+  console.log(`HTTP ${req.method} ${url}`);
+
+  const handled = await twilioRouter(req, res);
+  if (!handled) {
+    res.writeHead(404, { 'Content-Type': 'text/plain' });
+    res.end('Not Found');
+  }
+});
+
+httpServer.on('upgrade', (request: IncomingMessage, socket, head) => {
+  const pathname = request.url || '';
+  const headers = request.headers;
+
+  console.log(`WebSocket upgrade request: ${pathname}`);
+  console.log(`  Headers: ${JSON.stringify(headers)}`);
+
+  if (pathname.startsWith('/twilio/stream')) {
+    console.log('Handling Twilio stream WebSocket upgrade');
+    wss.handleUpgrade(request, socket, head, (ws) => {
+      console.log('WebSocket upgrade complete, emitting connection');
+      wss.emit('connection', ws, request);
+    });
+  } else {
+    console.log('Unknown WebSocket path, ignoring');
+  }
+});
+
+interface TwilioStreamState {
+  streamSid: string | null;
+  callSid: string | null;
+  socketId: string | null;
+}
+
+function findSocketIdForCall(callSid: string): string | null {
+  for (const [sid, cid] of activeCallSids.entries()) {
+    if (cid === callSid) return sid;
+  }
+  return null;
+}
+
+function handleTwilioStreamStart(
+  state: TwilioStreamState,
+  message: { start: { streamSid: string; callSid: string } },
+  ws: WebSocket
+): void {
+  state.streamSid = message.start.streamSid;
+  state.callSid = message.start.callSid;
+  console.log(`Stream started: ${state.streamSid}, Call: ${state.callSid}`);
+
+  console.log('Active calls:', [...activeCallSids.entries()]);
+  state.socketId = findSocketIdForCall(state.callSid);
+  console.log(`Found socketId: ${state.socketId}`);
+
+  if (!state.socketId || !state.streamSid || !state.callSid) {
+    console.log('Missing state, using fallback socketId');
+    state.socketId = activeCallSids.keys().next().value ?? null;
+  }
+
+  if (!state.socketId) {
+    console.error('No socket found for call, cannot process audio');
+    return;
+  }
+
+  const socket = io.sockets.sockets.get(state.socketId);
+  socket?.emit('twilio_stream_started', {
+    streamSid: state.streamSid,
+    callSid: state.callSid,
+  });
+
+  const capturedSocketId = state.socketId;
+  createAudioBridge(
+    state.streamSid,
+    state.callSid,
+    ws,
+    (transcript, isFinal) => {
+      if (isFinal) processTranscript(capturedSocketId, transcript);
+    }
+  );
+
+  deepgramReady.set(state.socketId, false);
+  pendingAudioBuffers.set(state.socketId, []);
+  deepgramReadyOutbound.set(state.socketId, false);
+  pendingAudioBuffersOutbound.set(state.socketId, []);
+
+  createDeepgramConnection(
+    socket as Parameters<typeof createDeepgramConnection>[0],
+    { model: 'flux-general-en', encoding: 'linear16', sampleRate: 16000 },
+    'inbound'
+  );
+  createDeepgramConnection(
+    socket as Parameters<typeof createDeepgramConnection>[0],
+    { model: 'flux-general-en', encoding: 'linear16', sampleRate: 16000 },
+    'outbound'
+  );
+}
+
+let mediaPacketCount = 0;
+
+function handleTwilioStreamMedia(
+  state: TwilioStreamState,
+  payload: string,
+  track: 'inbound' | 'outbound'
+): void {
+  if (!state.socketId) return;
+  const audioData = twilioToDeepgram(payload);
+
+  mediaPacketCount++;
+  if (mediaPacketCount % 100 === 0) {
+    console.log(
+      `Processed ${mediaPacketCount} audio packets (${track}), sending to Deepgram...`
+    );
+  }
+
+  sendAudioToDeepgram(state.socketId, audioData, track);
+
+  const socket = io.sockets.sockets.get(state.socketId);
+  socket?.emit('twilio_audio_in', audioData);
+}
+
+function handleTwilioStreamStop(state: TwilioStreamState): void {
+  console.log('Twilio stream stopped');
+  if (state.streamSid) removeAudioBridge(state.streamSid);
+  if (state.socketId) {
+    closeDeepgramConnection(state.socketId);
+    const socket = io.sockets.sockets.get(state.socketId);
+    socket?.emit('twilio_stream_stopped');
+  }
+}
+
+function cleanupTwilioStream(state: TwilioStreamState): void {
+  console.log('Twilio media stream disconnected');
+  if (state.streamSid) removeAudioBridge(state.streamSid);
+  if (state.socketId) closeDeepgramConnection(state.socketId);
+}
+
+wss.on('connection', (ws: WebSocket, _request: IncomingMessage) => {
+  console.log('Twilio media stream connected');
+
+  const state: TwilioStreamState = {
+    streamSid: null,
+    callSid: null,
+    socketId: activeCallSids.keys().next().value ?? null,
+  };
+
+  ws.on('message', (data: Buffer) => {
+    try {
+      const message = JSON.parse(data.toString());
+
+      if (message.event === 'connected') {
+        console.log('Twilio stream connected:', message);
+      } else if (message.event === 'start') {
+        handleTwilioStreamStart(state, message, ws);
+      } else if (message.event === 'media' && message.media?.payload) {
+        const track = message.media.track === 'outbound' ? 'outbound' : 'inbound';
+        handleTwilioStreamMedia(state, message.media.payload, track);
+      } else if (message.event === 'stop') {
+        handleTwilioStreamStop(state);
+      } else {
+        console.log('Unknown Twilio event:', message.event);
+      }
+    } catch (error) {
+      console.error('Error processing Twilio message:', error);
+    }
+  });
+
+  ws.on('close', () => cleanupTwilioStream(state));
+
+  ws.on('error', (error) => {
+    console.error('Twilio WebSocket error:', error);
+  });
+});
+
 io.on('connection', (socket) => {
   console.log(`Client connected: ${socket.id}`);
 
-  // Initialize conversation history for this socket
   conversationHistory.set(socket.id, []);
 
-  // Handle call control events
   socket.on('start_call', () => {
     console.log(`Call started by ${socket.id}`);
-    // Clear conversation history when starting new call
     conversationHistory.set(socket.id, []);
     socket.emit('connection_ready');
   });
@@ -333,24 +592,134 @@ io.on('connection', (socket) => {
     sendAudioToDeepgram(socket.id, audioData);
   });
 
-  // Handle text simulation for testing
+  socket.on('webrtc_call_started', (data: { callSid: string; phoneNumber: string }) => {
+    console.log(`WebRTC call started: ${data.callSid} for socket ${socket.id}`);
+    activeCallSids.set(socket.id, data.callSid);
+    conversationHistory.set(socket.id, []);
+  });
+
+  socket.on('twilio_call_start', async (data: { phoneNumber: string }) => {
+    console.log('Starting Twilio call...');
+
+    if (serverUrl.includes('localhost')) {
+      socket.emit('twilio_error', {
+        error:
+          'Cannot make calls with localhost. Set SERVER_URL to your ngrok/public URL (e.g., https://abc123.ngrok.io)',
+      });
+      return;
+    }
+
+    try {
+      const wsProtocol = serverUrl.startsWith('https') ? 'wss' : 'ws';
+      const wsHost = serverUrl.replace(/^https?:\/\//, '');
+      const streamUrl = `${wsProtocol}://${wsHost}/twilio/stream`;
+      const statusCallbackUrl = `${serverUrl}/twilio/status`;
+
+      const result = await initiateOutboundCall({
+        to: data.phoneNumber,
+        streamUrl,
+        statusCallbackUrl,
+      });
+
+      activeCallSids.set(socket.id, result.callSid);
+      conversationHistory.set(socket.id, []);
+
+      deepgramReadyOutbound.set(socket.id, false);
+      pendingAudioBuffersOutbound.set(socket.id, []);
+      createDeepgramConnection(
+        socket as Parameters<typeof createDeepgramConnection>[0],
+        { model: 'flux-general-en', encoding: 'linear16', sampleRate: 16000 },
+        'outbound'
+      );
+
+      socket.emit('twilio_call_initiated', {
+        callSid: result.callSid,
+        status: result.status,
+      });
+
+      console.log(`Call initiated: ${result.callSid}`);
+    } catch (error) {
+      console.error('Failed to initiate call:', error);
+      socket.emit('twilio_error', {
+        error: error instanceof Error ? error.message : 'Failed to start call',
+      });
+    }
+  });
+
+  socket.on('twilio_call_end', async (data: { callSid: string }) => {
+    console.log(`Ending Twilio call: ${data.callSid}`);
+
+    try {
+      await endCall(data.callSid);
+      activeCallSids.delete(socket.id);
+      closeDeepgramConnection(socket.id);
+
+      socket.emit('twilio_call_ended', { callSid: data.callSid });
+    } catch (error) {
+      console.error('Failed to end call:', error);
+      socket.emit('twilio_error', {
+        error: error instanceof Error ? error.message : 'Failed to end call',
+      });
+    }
+  });
+
   socket.on('simulate_speech', (data: { speaker: string; text: string }) => {
     processSimulatedSpeech(socket.id, data);
   });
 
-  // Handle demo conversation
   socket.on('run_demo', () => {
     runDemoConversation(socket.id);
   });
 
+  socket.on('request_call_summary', async (data: { duration: number }) => {
+    console.log(`Generating call summary for ${socket.id}`);
+    const history = conversationHistory.get(socket.id) || [];
+    
+    if (history.length === 0) {
+      socket.emit('call_summary', {
+        duration: data.duration,
+        final_motivation_level: 0,
+        pain_points: [],
+        objections: [],
+        summary: 'No conversation recorded.',
+        next_steps: 'Try making another call.',
+      });
+      return;
+    }
+
+    try {
+      const summary = await generateCallSummary(history, data.duration);
+      socket.emit('call_summary', summary);
+    } catch (error) {
+      console.error('Failed to generate summary:', error);
+      socket.emit('call_summary', {
+        duration: data.duration,
+        final_motivation_level: 5,
+        pain_points: [],
+        objections: [],
+        summary: 'Failed to generate summary.',
+        next_steps: 'Follow up with the seller.',
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  });
+
   socket.on('disconnect', (reason) => {
     console.log(`Client disconnected: ${socket.id} (${reason})`);
+
+    const callSid = activeCallSids.get(socket.id);
+    if (callSid) {
+      endCall(callSid).catch(console.error);
+      activeCallSids.delete(socket.id);
+    }
+
+    clearConversationContext(socket.id);
+
     closeDeepgramConnection(socket.id);
     conversationHistory.delete(socket.id);
   });
 });
 
-// Production error handling
 if (process.env.NODE_ENV === 'production') {
   process.on('uncaughtException', (err) => {
     console.error('Uncaught Exception:', err);
@@ -366,4 +735,6 @@ if (process.env.NODE_ENV === 'production') {
 httpServer.listen(port, () => {
   console.log(`> Socket.io server ready on http://localhost:${port}`);
   console.log(`> Accepting connections from: ${frontendUrl}`);
+  console.log(`> Twilio webhooks at: ${serverUrl}/twilio/voice`);
+  console.log(`> Twilio stream at: ws://localhost:${port}/twilio/stream`);
 });
