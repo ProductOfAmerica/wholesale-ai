@@ -86,19 +86,6 @@ export async function endCall(callSid: string): Promise<void> {
   });
 }
 
-export async function getCallStatus(
-  callSid: string
-): Promise<{ status: string; duration: string | null }> {
-  const client = getTwilioClient();
-
-  const call = await client.calls(callSid).fetch();
-
-  return {
-    status: call.status,
-    duration: call.duration,
-  };
-}
-
 export function generateStreamTwiML(streamUrl: string): string {
   const response = new Twilio.twiml.VoiceResponse();
 

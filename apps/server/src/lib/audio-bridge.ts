@@ -140,10 +140,6 @@ export function createAudioBridge(
   return bridge;
 }
 
-export function getAudioBridge(streamSid: string): AudioBridge | undefined {
-  return activeBridges.get(streamSid);
-}
-
 export function removeAudioBridge(streamSid: string): void {
   const bridge = activeBridges.get(streamSid);
   if (bridge) {
@@ -152,27 +148,4 @@ export function removeAudioBridge(streamSid: string): void {
     }
     activeBridges.delete(streamSid);
   }
-}
-
-export function getAllBridges(): Map<string, AudioBridge> {
-  return activeBridges;
-}
-
-export function sendAudioToTwilio(streamSid: string, audioData: Buffer): void {
-  const bridge = activeBridges.get(streamSid);
-  if (!bridge || bridge.twilioWs.readyState !== 1) {
-    return;
-  }
-
-  const mulawBase64 = deepgramToTwilio(audioData);
-
-  const message = JSON.stringify({
-    event: 'media',
-    streamSid: bridge.streamSid,
-    media: {
-      payload: mulawBase64,
-    },
-  });
-
-  bridge.twilioWs.send(message);
 }

@@ -21,12 +21,6 @@ export default async function HomePage() {
           >
             Start Call
           </Link>
-          <Link
-            href="/test"
-            className="bg-gray-600 hover:bg-gray-700 text-white px-6 py-3 rounded-lg font-medium transition-colors"
-          >
-            Test Features
-          </Link>
         </div>
       </div>
     </div>

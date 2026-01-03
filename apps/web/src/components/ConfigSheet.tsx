@@ -112,15 +112,3 @@ export function ConfigSheet({ onConfigChange }: ConfigSheetProps) {
     </Sheet>
   );
 }
-
-export function useConfig() {
-  const [config, setConfig] = useState<Config>({
-    initialScript: DEFAULT_SCRIPT,
-  });
-
-  useEffect(() => {
-    setConfig(loadConfig());
-  }, []);
-
-  return config;
-}

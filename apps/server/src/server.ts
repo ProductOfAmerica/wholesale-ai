@@ -288,6 +288,97 @@ function getBackoffDelay(attempt: number): number {
   return Math.floor(cappedDelay + jitter);
 }
 
+interface DeepgramConnectionContext {
+  socket: ReturnType<typeof io.sockets.sockets.get> & {
+    id: string;
+    emit: (event: string, data?: unknown) => void;
+  };
+  config: DeepgramConfig;
+  track: 'inbound' | 'outbound';
+  connectionsMap: Map<string, WebSocket>;
+  readyMap: Map<string, boolean>;
+  buffersMap: Map<string, Buffer[]>;
+  reconnectKey: string;
+  speaker: 'seller' | 'user';
+}
+
+function handleDeepgramOpen(
+  ctx: DeepgramConnectionContext,
+  deepgramWS: WebSocket
+): void {
+  const { socket, track, connectionsMap, readyMap, buffersMap, reconnectKey } =
+    ctx;
+  console.log(`Deepgram WebSocket connected for ${socket.id} (${track})`);
+  connectionsMap.set(socket.id, deepgramWS);
+  readyMap.set(socket.id, true);
+  deepgramReconnectAttempts.delete(reconnectKey);
+  socket.emit('deepgram_connected', { track });
+
+  const buffered = buffersMap.get(socket.id);
+  if (!buffered || buffered.length === 0) return;
+
+  console.log(
+    `Flushing ${buffered.length} buffered audio packets to Deepgram (${track})`
+  );
+  for (const audioData of buffered) {
+    deepgramWS.send(audioData);
+  }
+  buffersMap.delete(socket.id);
+}
+
+function handleDeepgramClose(
+  ctx: DeepgramConnectionContext,
+  code: number,
+  reason: Buffer
+): void {
+  const {
+    socket,
+    config,
+    track,
+    connectionsMap,
+    readyMap,
+    buffersMap,
+    reconnectKey,
+  } = ctx;
+  console.log(
+    `Deepgram WebSocket closed for ${socket.id} (${track}): ${code} ${reason}`
+  );
+  connectionsMap.delete(socket.id);
+  readyMap.delete(socket.id);
+  buffersMap.delete(socket.id);
+
+  const hasActiveCall = activeCallSids.has(socket.id);
+  const attempts = deepgramReconnectAttempts.get(reconnectKey) || 0;
+  const shouldReconnect = hasActiveCall && attempts < MAX_RECONNECT_ATTEMPTS;
+
+  if (!shouldReconnect) {
+    deepgramReconnectAttempts.delete(reconnectKey);
+    socket.emit('deepgram_disconnected', {
+      code,
+      reason: reason.toString(),
+      track,
+    });
+    return;
+  }
+
+  deepgramReconnectAttempts.set(reconnectKey, attempts + 1);
+  const reconnectDelay = getBackoffDelay(attempts);
+  console.log(
+    `Reconnecting Deepgram for ${socket.id} (${track}), attempt ${attempts + 1}/${MAX_RECONNECT_ATTEMPTS}, delay ${reconnectDelay}ms`
+  );
+  socket.emit('deepgram_reconnecting', {
+    track,
+    attempt: attempts + 1,
+    delay: reconnectDelay,
+  });
+
+  setTimeout(() => {
+    if (activeCallSids.has(socket.id)) {
+      createDeepgramConnection(socket, config, track);
+    }
+  }, reconnectDelay);
+}
+
 function createDeepgramConnection(
   socket: ReturnType<typeof io.sockets.sockets.get> & {
     id: string;
@@ -321,24 +412,18 @@ function createDeepgramConnection(
     headers: { Authorization: `token ${apiKey}` },
   });
 
-  deepgramWS.on('open', () => {
-    console.log(`Deepgram WebSocket connected for ${socket.id} (${track})`);
-    connectionsMap.set(socket.id, deepgramWS);
-    readyMap.set(socket.id, true);
-    deepgramReconnectAttempts.delete(reconnectKey);
-    socket.emit('deepgram_connected', { track });
+  const ctx: DeepgramConnectionContext = {
+    socket,
+    config,
+    track,
+    connectionsMap,
+    readyMap,
+    buffersMap,
+    reconnectKey,
+    speaker,
+  };
 
-    const buffered = buffersMap.get(socket.id);
-    if (buffered && buffered.length > 0) {
-      console.log(
-        `Flushing ${buffered.length} buffered audio packets to Deepgram (${track})`
-      );
-      for (const audioData of buffered) {
-        deepgramWS.send(audioData);
-      }
-      buffersMap.delete(socket.id);
-    }
-  });
+  deepgramWS.on('open', () => handleDeepgramOpen(ctx, deepgramWS));
 
   deepgramWS.on('message', (data: Buffer) => {
     handleDeepgramMessage(socket.id, data, speaker);
@@ -352,43 +437,9 @@ function createDeepgramConnection(
     socket.emit('deepgram_error', { error: error.message, track });
   });
 
-  deepgramWS.on('close', (code: number, reason: Buffer) => {
-    console.log(
-      `Deepgram WebSocket closed for ${socket.id} (${track}): ${code} ${reason}`
-    );
-    connectionsMap.delete(socket.id);
-    readyMap.delete(socket.id);
-    buffersMap.delete(socket.id);
-
-    const hasActiveCall = activeCallSids.has(socket.id);
-    const attempts = deepgramReconnectAttempts.get(reconnectKey) || 0;
-
-    if (hasActiveCall && attempts < MAX_RECONNECT_ATTEMPTS) {
-      deepgramReconnectAttempts.set(reconnectKey, attempts + 1);
-      const delay = getBackoffDelay(attempts);
-      console.log(
-        `Reconnecting Deepgram for ${socket.id} (${track}), attempt ${attempts + 1}/${MAX_RECONNECT_ATTEMPTS}, delay ${delay}ms`
-      );
-      socket.emit('deepgram_reconnecting', {
-        track,
-        attempt: attempts + 1,
-        delay,
-      });
-
-      setTimeout(() => {
-        if (activeCallSids.has(socket.id)) {
-          createDeepgramConnection(socket, config, track);
-        }
-      }, delay);
-    } else {
-      deepgramReconnectAttempts.delete(reconnectKey);
-      socket.emit('deepgram_disconnected', {
-        code,
-        reason: reason.toString(),
-        track,
-      });
-    }
-  });
+  deepgramWS.on('close', (code: number, reason: Buffer) =>
+    handleDeepgramClose(ctx, code, reason)
+  );
 }
 
 function sendAudioToDeepgram(
@@ -614,6 +665,44 @@ function cleanupTwilioStream(state: TwilioStreamState): void {
   if (state.socketId) closeDeepgramConnection(state.socketId);
 }
 
+interface TwilioMessage {
+  event: string;
+  start?: { streamSid: string; callSid: string };
+  media?: { payload: string; track: string };
+}
+
+function routeTwilioMessage(
+  state: TwilioStreamState,
+  message: TwilioMessage,
+  ws: WebSocket
+): void {
+  switch (message.event) {
+    case 'connected':
+      console.log('Twilio stream connected:', message);
+      break;
+    case 'start':
+      handleTwilioStreamStart(
+        state,
+        message as TwilioMessage & {
+          start: { streamSid: string; callSid: string };
+        },
+        ws
+      );
+      break;
+    case 'media': {
+      if (!message.media?.payload) break;
+      const track = message.media.track === 'outbound' ? 'outbound' : 'inbound';
+      handleTwilioStreamMedia(state, message.media.payload, track);
+      break;
+    }
+    case 'stop':
+      handleTwilioStreamStop(state);
+      break;
+    default:
+      console.log('Unknown Twilio event:', message.event);
+  }
+}
+
 wss.on('connection', (ws: WebSocket, _request: IncomingMessage) => {
   console.log('Twilio media stream connected');
 
@@ -625,21 +714,8 @@ wss.on('connection', (ws: WebSocket, _request: IncomingMessage) => {
 
   ws.on('message', (data: Buffer) => {
     try {
-      const message = JSON.parse(data.toString());
-
-      if (message.event === 'connected') {
-        console.log('Twilio stream connected:', message);
-      } else if (message.event === 'start') {
-        handleTwilioStreamStart(state, message, ws);
-      } else if (message.event === 'media' && message.media?.payload) {
-        const track =
-          message.media.track === 'outbound' ? 'outbound' : 'inbound';
-        handleTwilioStreamMedia(state, message.media.payload, track);
-      } else if (message.event === 'stop') {
-        handleTwilioStreamStop(state);
-      } else {
-        console.log('Unknown Twilio event:', message.event);
-      }
+      const message = JSON.parse(data.toString()) as TwilioMessage;
+      routeTwilioMessage(state, message, ws);
     } catch (error) {
       console.error('Error processing Twilio message:', error);
     }
@@ -652,161 +728,174 @@ wss.on('connection', (ws: WebSocket, _request: IncomingMessage) => {
   });
 });
 
+type SocketType = Parameters<Parameters<typeof io.on>[1]>[0];
+
+function handleStartCall(socket: SocketType): void {
+  console.log(`Call started by ${socket.id}`);
+  conversationHistory.set(socket.id, []);
+  socket.emit('connection_ready');
+}
+
+function handleEndCall(socket: SocketType): void {
+  console.log(`Call ended by ${socket.id}`);
+  closeDeepgramConnection(socket.id);
+}
+
+function handleWebRTCCallStarted(
+  socket: SocketType,
+  data: { callSid: string; phoneNumber: string }
+): void {
+  console.log(`WebRTC call started: ${data.callSid} for socket ${socket.id}`);
+  activeCallSids.set(socket.id, data.callSid);
+  conversationHistory.set(socket.id, []);
+}
+
+async function handleTwilioCallStart(
+  socket: SocketType,
+  data: { phoneNumber: string }
+): Promise<void> {
+  console.log('Starting Twilio call...');
+
+  if (serverUrl.includes('localhost')) {
+    socket.emit('twilio_error', {
+      error:
+        'Cannot make calls with localhost. Set SERVER_URL to your ngrok/public URL (e.g., https://abc123.ngrok.io)',
+    });
+    return;
+  }
+
+  try {
+    const wsProtocol = serverUrl.startsWith('https') ? 'wss' : 'ws';
+    const wsHost = serverUrl.replace(/^https?:\/\//, '');
+    const streamUrl = `${wsProtocol}://${wsHost}/twilio/stream`;
+    const statusCallbackUrl = `${serverUrl}/twilio/status`;
+
+    const result = await initiateOutboundCall({
+      to: data.phoneNumber,
+      streamUrl,
+      statusCallbackUrl,
+    });
+
+    activeCallSids.set(socket.id, result.callSid);
+    conversationHistory.set(socket.id, []);
+
+    deepgramReadyOutbound.set(socket.id, false);
+    pendingAudioBuffersOutbound.set(socket.id, []);
+    createDeepgramConnection(
+      socket as Parameters<typeof createDeepgramConnection>[0],
+      { model: 'flux-general-en', encoding: 'linear16', sampleRate: 16000 },
+      'outbound'
+    );
+
+    socket.emit('twilio_call_initiated', {
+      callSid: result.callSid,
+      status: result.status,
+    });
+
+    console.log(`Call initiated: ${result.callSid}`);
+  } catch (error) {
+    console.error('Failed to initiate call:', error);
+    socket.emit('twilio_error', {
+      error: error instanceof Error ? error.message : 'Failed to start call',
+    });
+  }
+}
+
+async function handleTwilioCallEnd(
+  socket: SocketType,
+  data: { callSid: string }
+): Promise<void> {
+  console.log(`Ending Twilio call: ${data.callSid}`);
+
+  try {
+    await endCall(data.callSid);
+    activeCallSids.delete(socket.id);
+    closeDeepgramConnection(socket.id);
+
+    socket.emit('twilio_call_ended', { callSid: data.callSid });
+  } catch (error) {
+    console.error('Failed to end call:', error);
+    socket.emit('twilio_error', {
+      error: error instanceof Error ? error.message : 'Failed to end call',
+    });
+  }
+}
+
+async function handleRequestCallSummary(
+  socket: SocketType,
+  data: { duration: number }
+): Promise<void> {
+  console.log(`Generating call summary for ${socket.id}`);
+  const history = conversationHistory.get(socket.id) || [];
+
+  if (history.length === 0) {
+    socket.emit('call_summary', {
+      duration: data.duration,
+      final_motivation_level: 0,
+      pain_points: [],
+      objections: [],
+      summary: 'No conversation recorded.',
+      next_steps: 'Try making another call.',
+    });
+    return;
+  }
+
+  try {
+    const summary = await generateCallSummary(history, data.duration);
+    socket.emit('call_summary', summary);
+  } catch (error) {
+    console.error('Failed to generate summary:', error);
+    socket.emit('call_summary', {
+      duration: data.duration,
+      final_motivation_level: 5,
+      pain_points: [],
+      objections: [],
+      summary: 'Failed to generate summary.',
+      next_steps: 'Follow up with the seller.',
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+}
+
+function handleDisconnect(socket: SocketType, reason: string): void {
+  console.log(`Client disconnected: ${socket.id} (${reason})`);
+
+  const callSid = activeCallSids.get(socket.id);
+  if (callSid) {
+    endCall(callSid).catch(console.error);
+    activeCallSids.delete(socket.id);
+  }
+
+  clearConversationContext(socket.id);
+  closeDeepgramConnection(socket.id);
+  conversationHistory.delete(socket.id);
+}
+
 io.on('connection', (socket) => {
   console.log(`Client connected: ${socket.id}`);
-
   conversationHistory.set(socket.id, []);
 
-  socket.on('start_call', () => {
-    console.log(`Call started by ${socket.id}`);
-    conversationHistory.set(socket.id, []);
-    socket.emit('connection_ready');
-  });
-
-  socket.on('end_call', () => {
-    console.log(`Call ended by ${socket.id}`);
-    closeDeepgramConnection(socket.id);
-  });
-
-  socket.on('deepgram_connect', (config: DeepgramConfig) => {
-    createDeepgramConnection(socket, config);
-  });
-
-  socket.on('deepgram_audio', (audioData: Buffer) => {
-    sendAudioToDeepgram(socket.id, audioData);
-  });
-
-  socket.on(
-    'webrtc_call_started',
-    (data: { callSid: string; phoneNumber: string }) => {
-      console.log(
-        `WebRTC call started: ${data.callSid} for socket ${socket.id}`
-      );
-      activeCallSids.set(socket.id, data.callSid);
-      conversationHistory.set(socket.id, []);
-    }
+  socket.on('start_call', () => handleStartCall(socket));
+  socket.on('end_call', () => handleEndCall(socket));
+  socket.on('deepgram_connect', (config: DeepgramConfig) =>
+    createDeepgramConnection(socket, config)
   );
-
-  socket.on('twilio_call_start', async (data: { phoneNumber: string }) => {
-    console.log('Starting Twilio call...');
-
-    if (serverUrl.includes('localhost')) {
-      socket.emit('twilio_error', {
-        error:
-          'Cannot make calls with localhost. Set SERVER_URL to your ngrok/public URL (e.g., https://abc123.ngrok.io)',
-      });
-      return;
-    }
-
-    try {
-      const wsProtocol = serverUrl.startsWith('https') ? 'wss' : 'ws';
-      const wsHost = serverUrl.replace(/^https?:\/\//, '');
-      const streamUrl = `${wsProtocol}://${wsHost}/twilio/stream`;
-      const statusCallbackUrl = `${serverUrl}/twilio/status`;
-
-      const result = await initiateOutboundCall({
-        to: data.phoneNumber,
-        streamUrl,
-        statusCallbackUrl,
-      });
-
-      activeCallSids.set(socket.id, result.callSid);
-      conversationHistory.set(socket.id, []);
-
-      deepgramReadyOutbound.set(socket.id, false);
-      pendingAudioBuffersOutbound.set(socket.id, []);
-      createDeepgramConnection(
-        socket as Parameters<typeof createDeepgramConnection>[0],
-        { model: 'flux-general-en', encoding: 'linear16', sampleRate: 16000 },
-        'outbound'
-      );
-
-      socket.emit('twilio_call_initiated', {
-        callSid: result.callSid,
-        status: result.status,
-      });
-
-      console.log(`Call initiated: ${result.callSid}`);
-    } catch (error) {
-      console.error('Failed to initiate call:', error);
-      socket.emit('twilio_error', {
-        error: error instanceof Error ? error.message : 'Failed to start call',
-      });
-    }
-  });
-
-  socket.on('twilio_call_end', async (data: { callSid: string }) => {
-    console.log(`Ending Twilio call: ${data.callSid}`);
-
-    try {
-      await endCall(data.callSid);
-      activeCallSids.delete(socket.id);
-      closeDeepgramConnection(socket.id);
-
-      socket.emit('twilio_call_ended', { callSid: data.callSid });
-    } catch (error) {
-      console.error('Failed to end call:', error);
-      socket.emit('twilio_error', {
-        error: error instanceof Error ? error.message : 'Failed to end call',
-      });
-    }
-  });
-
-  socket.on('simulate_speech', (data: { speaker: string; text: string }) => {
-    processSimulatedSpeech(socket.id, data);
-  });
-
-  socket.on('run_demo', () => {
-    runDemoConversation(socket.id);
-  });
-
-  socket.on('request_call_summary', async (data: { duration: number }) => {
-    console.log(`Generating call summary for ${socket.id}`);
-    const history = conversationHistory.get(socket.id) || [];
-
-    if (history.length === 0) {
-      socket.emit('call_summary', {
-        duration: data.duration,
-        final_motivation_level: 0,
-        pain_points: [],
-        objections: [],
-        summary: 'No conversation recorded.',
-        next_steps: 'Try making another call.',
-      });
-      return;
-    }
-
-    try {
-      const summary = await generateCallSummary(history, data.duration);
-      socket.emit('call_summary', summary);
-    } catch (error) {
-      console.error('Failed to generate summary:', error);
-      socket.emit('call_summary', {
-        duration: data.duration,
-        final_motivation_level: 5,
-        pain_points: [],
-        objections: [],
-        summary: 'Failed to generate summary.',
-        next_steps: 'Follow up with the seller.',
-        error: error instanceof Error ? error.message : 'Unknown error',
-      });
-    }
-  });
-
-  socket.on('disconnect', (reason) => {
-    console.log(`Client disconnected: ${socket.id} (${reason})`);
-
-    const callSid = activeCallSids.get(socket.id);
-    if (callSid) {
-      endCall(callSid).catch(console.error);
-      activeCallSids.delete(socket.id);
-    }
-
-    clearConversationContext(socket.id);
-
-    closeDeepgramConnection(socket.id);
-    conversationHistory.delete(socket.id);
-  });
+  socket.on('deepgram_audio', (audioData: Buffer) =>
+    sendAudioToDeepgram(socket.id, audioData)
+  );
+  socket.on('webrtc_call_started', (data) =>
+    handleWebRTCCallStarted(socket, data)
+  );
+  socket.on('twilio_call_start', (data) => handleTwilioCallStart(socket, data));
+  socket.on('twilio_call_end', (data) => handleTwilioCallEnd(socket, data));
+  socket.on('simulate_speech', (data) =>
+    processSimulatedSpeech(socket.id, data)
+  );
+  socket.on('run_demo', () => runDemoConversation(socket.id));
+  socket.on('request_call_summary', (data) =>
+    handleRequestCallSummary(socket, data)
+  );
+  socket.on('disconnect', (reason) => handleDisconnect(socket, reason));
 });
 
 if (process.env.NODE_ENV === 'production') {

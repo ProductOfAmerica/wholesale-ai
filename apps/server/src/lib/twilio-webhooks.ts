@@ -237,11 +237,62 @@ async function handleEndCallRequest(
   }
 }
 
+interface RouteContext {
+  io: SocketIOServer;
+  serverUrl: string;
+  query: Record<string, string | string[] | undefined>;
+}
+
+type RouteHandler = (
+  req: IncomingMessage,
+  res: ServerResponse,
+  ctx: RouteContext
+) => void | Promise<void>;
+
+interface Route {
+  path: string;
+  methods: string[];
+  handler: RouteHandler;
+}
+
+const routes: Route[] = [
+  {
+    path: '/twilio/token',
+    methods: ['GET'],
+    handler: (req, res) => handleTokenRequest(req, res),
+  },
+  {
+    path: '/twilio/voice',
+    methods: ['POST'],
+    handler: (req, res, ctx) => handleVoiceWebhook(req, res, ctx.query),
+  },
+  {
+    path: '/twilio/voice-client',
+    methods: ['POST'],
+    handler: (req, res, ctx) =>
+      handleVoiceClientWebhook(req, res, ctx.serverUrl),
+  },
+  {
+    path: '/twilio/status',
+    methods: ['POST'],
+    handler: (req, res, ctx) => handleStatusCallback(req, res, ctx.io),
+  },
+  {
+    path: '/twilio/summary',
+    methods: ['POST', 'OPTIONS'],
+    handler: (req, res) => handleSummaryRequest(req, res),
+  },
+  {
+    path: '/twilio/end-call',
+    methods: ['POST', 'OPTIONS'],
+    handler: (req, res) => handleEndCallRequest(req, res),
+  },
+];
+
 export function createTwilioRouter(io: SocketIOServer, serverUrl: string) {
   return async (
     req: IncomingMessage,
     res: ServerResponse
-    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: webhook router has many routes
   ): Promise<boolean> => {
     const parsed = parseUrl(req.url || '', true);
     const pathname = parsed.pathname || '';
@@ -250,42 +301,15 @@ export function createTwilioRouter(io: SocketIOServer, serverUrl: string) {
       return false;
     }
 
-    if (pathname === '/twilio/token' && req.method === 'GET') {
-      handleTokenRequest(req, res);
-      return true;
+    const route = routes.find(
+      (r) => r.path === pathname && r.methods.includes(req.method || '')
+    );
+
+    if (!route) {
+      return false;
     }
 
-    if (pathname === '/twilio/voice' && req.method === 'POST') {
-      handleVoiceWebhook(req, res, parsed.query);
-      return true;
-    }
-
-    if (pathname === '/twilio/voice-client' && req.method === 'POST') {
-      await handleVoiceClientWebhook(req, res, serverUrl);
-      return true;
-    }
-
-    if (pathname === '/twilio/status' && req.method === 'POST') {
-      await handleStatusCallback(req, res, io);
-      return true;
-    }
-
-    if (
-      pathname === '/twilio/summary' &&
-      (req.method === 'POST' || req.method === 'OPTIONS')
-    ) {
-      await handleSummaryRequest(req, res);
-      return true;
-    }
-
-    if (
-      pathname === '/twilio/end-call' &&
-      (req.method === 'POST' || req.method === 'OPTIONS')
-    ) {
-      await handleEndCallRequest(req, res);
-      return true;
-    }
-
-    return false;
+    await route.handler(req, res, { io, serverUrl, query: parsed.query });
+    return true;
   };
 }
