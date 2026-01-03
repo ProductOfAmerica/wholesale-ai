@@ -20,6 +20,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { useMicCapture } from '@/hooks/useMicCapture';
 import { useSocket } from '@/hooks/useSocket';
 import { type CallStatus, useTwilioCall } from '@/hooks/useTwilioCall';
+import { debug } from '@/lib/utils';
 
 function formatDuration(seconds: number): string {
   const mins = Math.floor(seconds / 60);
@@ -150,7 +151,7 @@ export function CallInterface() {
     if (!socket) return;
 
     socket.on('transcript_update', (data: TranscriptEntry) => {
-      console.log('Transcript update:', data);
+      debug.log('Transcript update:', data);
       setTranscript((prev) => [...prev, data]);
 
       if (data.speaker === 'seller') {
@@ -173,17 +174,17 @@ export function CallInterface() {
     });
 
     socket.on('ai_suggestion', (data: AISuggestion) => {
-      console.log('AI suggestion:', data);
+      debug.log('AI suggestion:', data);
       setCurrentSuggestion(data);
       setAiLoading(false);
     });
 
     socket.on('twilio_stream_started', () => {
-      console.log('Audio stream started for transcription');
+      debug.log('Audio stream started for transcription');
     });
 
     socket.on('call_summary', (data: CallSummary) => {
-      console.log('Call summary:', data);
+      debug.log('Call summary:', data);
       setCallSummary(data);
       setSummaryLoading(false);
     });

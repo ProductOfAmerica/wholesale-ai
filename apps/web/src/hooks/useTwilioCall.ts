@@ -3,6 +3,7 @@
 import { Call, Device } from '@twilio/voice-sdk';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Socket } from 'socket.io-client';
+import { debug } from '@/lib/utils';
 
 export type CallStatus =
   | 'idle'
@@ -54,7 +55,7 @@ async function cleanupOrphanedCall(callSid: string): Promise<void> {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ callSid }),
     });
-    console.log(`Cleaned up orphaned call: ${callSid}`);
+    debug.log(`Cleaned up orphaned call: ${callSid}`);
   } catch (error) {
     console.error('Failed to cleanup orphaned call:', error);
   }
@@ -69,12 +70,12 @@ function setupCallEventHandlers(
   activeCallRef: { current: Call | null }
 ): void {
   call.on('ringing', () => {
-    console.log('Call is ringing');
+    debug.log('Call is ringing');
     setCallState((prev) => ({ ...prev, status: 'ringing' }));
   });
 
   call.on('accept', () => {
-    console.log('Call connected');
+    debug.log('Call connected');
     const callSid = call.parameters.CallSid || null;
     setCallState((prev) => ({ ...prev, status: 'connected', callSid }));
     if (callSid) {
@@ -84,7 +85,7 @@ function setupCallEventHandlers(
   });
 
   call.on('disconnect', () => {
-    console.log('Call disconnected');
+    debug.log('Call disconnected');
     clearActiveCall();
     setCallState((prev) => ({ ...prev, status: 'ended' }));
     activeCallRef.current = null;
@@ -102,7 +103,7 @@ function setupCallEventHandlers(
   });
 
   call.on('cancel', () => {
-    console.log('Call cancelled');
+    debug.log('Call cancelled');
     clearActiveCall();
     setCallState((prev) => ({ ...prev, status: 'ended' }));
     activeCallRef.current = null;
@@ -130,9 +131,7 @@ export function useTwilioCall(socket: Socket | null) {
     const callAge = Date.now() - orphanedCall.startTime;
     const maxCallAge = 4 * 60 * 60 * 1000;
     if (callAge < maxCallAge) {
-      console.log(
-        `Found orphaned call: ${orphanedCall.callSid}, cleaning up...`
-      );
+      debug.log(`Found orphaned call: ${orphanedCall.callSid}, cleaning up...`);
       void cleanupOrphanedCall(orphanedCall.callSid);
     } else {
       clearActiveCall();
@@ -158,12 +157,12 @@ export function useTwilioCall(socket: Socket | null) {
         const { token } = await response.json();
 
         const device = new Device(token, {
-          logLevel: 1,
+          logLevel: process.env.NODE_ENV === 'development' ? 1 : 'error',
           codecPreferences: [Call.Codec.Opus, Call.Codec.PCMU],
         });
 
         device.on('registered', () => {
-          console.log('Twilio Device registered');
+          debug.log('Twilio Device registered');
           setDeviceReady(true);
         });
 
@@ -177,7 +176,7 @@ export function useTwilioCall(socket: Socket | null) {
         });
 
         device.on('unregistered', () => {
-          console.log('Twilio Device unregistered');
+          debug.log('Twilio Device unregistered');
           setDeviceReady(false);
         });
 
@@ -287,10 +286,7 @@ export function useTwilioCall(socket: Socket | null) {
   const reAssociateCall = useCallback(() => {
     const storedCall = getActiveCall();
     if (storedCall && socket && callState.status === 'connected') {
-      console.log(
-        'Re-associating socket with active call:',
-        storedCall.callSid
-      );
+      debug.log('Re-associating socket with active call:', storedCall.callSid);
       socket.emit('webrtc_call_started', {
         callSid: storedCall.callSid,
         phoneNumber: storedCall.phoneNumber,

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { io, type Socket } from 'socket.io-client';
+import { debug } from '@/lib/utils';
 
 type ReconnectCallback = () => void;
 
@@ -29,25 +30,25 @@ export function useSocket(): {
     setSocket(socketInstance);
 
     socketInstance.on('connect', () => {
-      console.log('Connected to server');
+      debug.log('Connected to server');
       const wasReconnect = wasConnectedRef.current;
       setConnected(true);
       wasConnectedRef.current = true;
 
       if (wasReconnect && reconnectCallbackRef.current) {
-        console.log('Socket reconnected, running callback...');
+        debug.log('Socket reconnected, running callback...');
         reconnectCallbackRef.current();
       }
     });
 
     socketInstance.on('disconnect', (reason) => {
-      console.log('Disconnected from server:', reason);
+      debug.log('Disconnected from server:', reason);
       setConnected(false);
     });
 
     socketInstance.on('connect_error', (error) => {
       if (socketInstance.active) {
-        console.log('Connection error, auto-reconnecting:', error.message);
+        debug.log('Connection error, auto-reconnecting:', error.message);
       } else {
         console.error('Connection denied by server:', error.message);
       }

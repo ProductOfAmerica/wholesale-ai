@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useRef, useState } from 'react';
+import { debug } from '@/lib/utils';
 
 export function useMicCapture() {
   const [audioLevel, setAudioLevel] = useState(0);
@@ -47,7 +48,7 @@ export function useMicCapture() {
       };
       updateLevel();
 
-      console.log('Mic capture started for transcription');
+      debug.log('Mic capture started for transcription');
     } catch (error) {
       console.error('Failed to start mic capture:', error);
     }
@@ -77,7 +78,7 @@ export function useMicCapture() {
       mediaStreamRef.current = null;
     }
     setAudioLevel(0);
-    console.log('Mic capture stopped');
+    debug.log('Mic capture stopped');
   }, []);
 
   return {
