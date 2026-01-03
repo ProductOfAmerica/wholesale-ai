@@ -276,6 +276,18 @@ interface DeepgramConfig {
   sampleRate: number;
 }
 
+const deepgramReconnectAttempts = new Map<string, number>();
+const MAX_RECONNECT_ATTEMPTS = 5;
+const BASE_DELAY_MS = 1000;
+const MAX_DELAY_MS = 30000;
+
+function getBackoffDelay(attempt: number): number {
+  const exponentialDelay = BASE_DELAY_MS * 2 ** attempt;
+  const cappedDelay = Math.min(exponentialDelay, MAX_DELAY_MS);
+  const jitter = Math.random() * 0.3 * cappedDelay;
+  return Math.floor(cappedDelay + jitter);
+}
+
 function createDeepgramConnection(
   socket: ReturnType<typeof io.sockets.sockets.get> & {
     id: string;
@@ -296,6 +308,7 @@ function createDeepgramConnection(
   const readyMap = track === 'inbound' ? deepgramReady : deepgramReadyOutbound;
   const buffersMap =
     track === 'inbound' ? pendingAudioBuffers : pendingAudioBuffersOutbound;
+  const reconnectKey = `${socket.id}-${track}`;
 
   console.log(
     `Starting Deepgram WebSocket for ${socket.id} (${track}/${speaker})`,
@@ -312,6 +325,7 @@ function createDeepgramConnection(
     console.log(`Deepgram WebSocket connected for ${socket.id} (${track})`);
     connectionsMap.set(socket.id, deepgramWS);
     readyMap.set(socket.id, true);
+    deepgramReconnectAttempts.delete(reconnectKey);
     socket.emit('deepgram_connected', { track });
 
     const buffered = buffersMap.get(socket.id);
@@ -345,11 +359,35 @@ function createDeepgramConnection(
     connectionsMap.delete(socket.id);
     readyMap.delete(socket.id);
     buffersMap.delete(socket.id);
-    socket.emit('deepgram_disconnected', {
-      code,
-      reason: reason.toString(),
-      track,
-    });
+
+    const hasActiveCall = activeCallSids.has(socket.id);
+    const attempts = deepgramReconnectAttempts.get(reconnectKey) || 0;
+
+    if (hasActiveCall && attempts < MAX_RECONNECT_ATTEMPTS) {
+      deepgramReconnectAttempts.set(reconnectKey, attempts + 1);
+      const delay = getBackoffDelay(attempts);
+      console.log(
+        `Reconnecting Deepgram for ${socket.id} (${track}), attempt ${attempts + 1}/${MAX_RECONNECT_ATTEMPTS}, delay ${delay}ms`
+      );
+      socket.emit('deepgram_reconnecting', {
+        track,
+        attempt: attempts + 1,
+        delay,
+      });
+
+      setTimeout(() => {
+        if (activeCallSids.has(socket.id)) {
+          createDeepgramConnection(socket, config, track);
+        }
+      }, delay);
+    } else {
+      deepgramReconnectAttempts.delete(reconnectKey);
+      socket.emit('deepgram_disconnected', {
+        code,
+        reason: reason.toString(),
+        track,
+      });
+    }
   });
 }
 

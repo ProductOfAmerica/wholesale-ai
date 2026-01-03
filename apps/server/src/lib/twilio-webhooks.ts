@@ -3,6 +3,7 @@ import { parse as parseUrl } from 'node:url';
 import type { Server as SocketIOServer } from 'socket.io';
 import { generateCallSummary } from './ai-analysis.js';
 import {
+  endCall,
   generateAccessToken,
   generateClientTwiML,
   generateStreamTwiML,
@@ -177,7 +178,9 @@ async function handleSummaryRequest(
       return;
     }
 
-    console.log(`Generating call summary via REST (${transcript.length} entries)`);
+    console.log(
+      `Generating call summary via REST (${transcript.length} entries)`
+    );
     const summary = await generateCallSummary(transcript, duration || 0);
 
     res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -187,7 +190,48 @@ async function handleSummaryRequest(
     res.writeHead(500, { 'Content-Type': 'application/json' });
     res.end(
       JSON.stringify({
-        error: error instanceof Error ? error.message : 'Failed to generate summary',
+        error:
+          error instanceof Error ? error.message : 'Failed to generate summary',
+      })
+    );
+  }
+}
+
+async function handleEndCallRequest(
+  req: IncomingMessage,
+  res: ServerResponse
+): Promise<void> {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204);
+    res.end();
+    return;
+  }
+
+  try {
+    const body = await getRequestBody(req);
+    const { callSid } = JSON.parse(body);
+
+    if (!callSid) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Missing callSid' }));
+      return;
+    }
+
+    console.log(`Ending orphaned call via REST: ${callSid}`);
+    await endCall(callSid);
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ success: true }));
+  } catch (error) {
+    console.error('Error ending call:', error);
+    res.writeHead(500, { 'Content-Type': 'application/json' });
+    res.end(
+      JSON.stringify({
+        error: error instanceof Error ? error.message : 'Failed to end call',
       })
     );
   }
@@ -226,8 +270,19 @@ export function createTwilioRouter(io: SocketIOServer, serverUrl: string) {
       return true;
     }
 
-    if (pathname === '/twilio/summary' && (req.method === 'POST' || req.method === 'OPTIONS')) {
+    if (
+      pathname === '/twilio/summary' &&
+      (req.method === 'POST' || req.method === 'OPTIONS')
+    ) {
       await handleSummaryRequest(req, res);
+      return true;
+    }
+
+    if (
+      pathname === '/twilio/end-call' &&
+      (req.method === 'POST' || req.method === 'OPTIONS')
+    ) {
+      await handleEndCallRequest(req, res);
       return true;
     }
 

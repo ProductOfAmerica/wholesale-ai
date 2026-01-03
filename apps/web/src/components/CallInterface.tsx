@@ -36,6 +36,47 @@ interface CallState {
   error: string | null;
 }
 
+const ACTIVE_CALL_KEY = 'wholesale-ai-active-call';
+
+interface StoredCallData {
+  callSid: string;
+  phoneNumber: string;
+  startTime: number;
+}
+
+function saveActiveCall(data: StoredCallData): void {
+  localStorage.setItem(ACTIVE_CALL_KEY, JSON.stringify(data));
+}
+
+function getActiveCall(): StoredCallData | null {
+  const stored = localStorage.getItem(ACTIVE_CALL_KEY);
+  if (!stored) return null;
+  try {
+    return JSON.parse(stored);
+  } catch {
+    return null;
+  }
+}
+
+function clearActiveCall(): void {
+  localStorage.removeItem(ACTIVE_CALL_KEY);
+}
+
+async function cleanupOrphanedCall(callSid: string): Promise<void> {
+  try {
+    const serverUrl = process.env.NEXT_PUBLIC_SOCKET_URL;
+    await fetch(`${serverUrl}/twilio/end-call`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ callSid }),
+    });
+    console.log(`Cleaned up orphaned call: ${callSid}`);
+  } catch (error) {
+    console.error('Failed to cleanup orphaned call:', error);
+  }
+  clearActiveCall();
+}
+
 function formatDuration(seconds: number): string {
   const mins = Math.floor(seconds / 60);
   const secs = seconds % 60;
@@ -137,7 +178,7 @@ function ActiveCallHeader({
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: main call UI has inherent complexity
 export function CallInterface() {
-  const { socket, connected } = useSocket();
+  const { socket, connected, onReconnect } = useSocket();
   const [callState, setCallState] = useState<CallState>({
     status: 'idle',
     callSid: null,
@@ -162,6 +203,22 @@ export function CallInterface() {
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const processorRef = useRef<ScriptProcessorNode | null>(null);
   const [audioLevel, setAudioLevel] = useState(0);
+
+  useEffect(() => {
+    const orphanedCall = getActiveCall();
+    if (orphanedCall) {
+      const callAge = Date.now() - orphanedCall.startTime;
+      const maxCallAge = 4 * 60 * 60 * 1000;
+      if (callAge < maxCallAge) {
+        console.log(
+          `Found orphaned call: ${orphanedCall.callSid}, cleaning up...`
+        );
+        cleanupOrphanedCall(orphanedCall.callSid);
+      } else {
+        clearActiveCall();
+      }
+    }
+  }, []);
 
   useEffect(() => {
     async function initDevice() {
@@ -222,6 +279,22 @@ export function CallInterface() {
       }
     };
   }, []);
+
+  useEffect(() => {
+    onReconnect(() => {
+      const storedCall = getActiveCall();
+      if (storedCall && socket && callState.status === 'connected') {
+        console.log(
+          'Re-associating socket with active call:',
+          storedCall.callSid
+        );
+        socket.emit('webrtc_call_started', {
+          callSid: storedCall.callSid,
+          phoneNumber: storedCall.phoneNumber,
+        });
+      }
+    });
+  }, [socket, callState.status, onReconnect]);
 
   useEffect(() => {
     if (!socket) return;
@@ -420,19 +493,24 @@ export function CallInterface() {
             status: 'connected',
             callSid,
           }));
-          if (socket && callSid) {
-            socket.emit('webrtc_call_started', { callSid, phoneNumber });
+          if (callSid) {
+            saveActiveCall({ callSid, phoneNumber, startTime: Date.now() });
+            if (socket) {
+              socket.emit('webrtc_call_started', { callSid, phoneNumber });
+            }
           }
         });
 
         call.on('disconnect', () => {
           console.log('Call disconnected');
+          clearActiveCall();
           setCallState((prev) => ({ ...prev, status: 'ended' }));
           activeCallRef.current = null;
         });
 
         call.on('error', (error) => {
           console.error('Call error:', error);
+          clearActiveCall();
           setCallState((prev) => ({
             ...prev,
             status: 'error',
@@ -443,6 +521,7 @@ export function CallInterface() {
 
         call.on('cancel', () => {
           console.log('Call cancelled');
+          clearActiveCall();
           setCallState((prev) => ({ ...prev, status: 'ended' }));
           activeCallRef.current = null;
         });
@@ -465,6 +544,7 @@ export function CallInterface() {
       activeCallRef.current = null;
     }
 
+    clearActiveCall();
     setCallState((prev) => ({ ...prev, status: 'ended' }));
 
     if (transcript.length > 0) {
