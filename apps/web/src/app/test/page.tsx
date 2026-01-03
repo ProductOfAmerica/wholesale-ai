@@ -1,40 +1,45 @@
-'use client';
-
 import type { AISuggestion, TranscriptEntry } from '@wholesale-ai/shared';
-import { useState } from 'react';
 import { AISuggestions } from '@/components/AISuggestions';
 import { LiveTranscript } from '@/components/LiveTranscript';
 import { MotivationGauge } from '@/components/MotivationGauge';
 
-export default function TestPage() {
-  const [transcript] = useState<TranscriptEntry[]>([
-    {
-      speaker: 'seller',
-      text: "Thanks for coming in today. I understand you're looking at bulk purchasing for your retail chain?",
-      timestamp: Date.now() - 5000,
-    },
-    {
-      speaker: 'user',
-      text: "Yes, we're expanding our electronics section and need competitive pricing on smartphones.",
-      timestamp: Date.now() - 4000,
-    },
-    {
-      speaker: 'seller',
-      text: 'Great! Our latest iPhone models start at $800 per unit for orders over 100 units. What kind of volume are you thinking?',
-      timestamp: Date.now() - 3000,
-    },
-  ]);
+// Static test data cached at build time
+async function getTestData() {
+  'use cache';
 
-  const [suggestion] = useState<AISuggestion>({
-    motivation_level: 7,
-    pain_points: ['High unit price', 'Volume requirements'],
-    objection_detected: true,
-    objection_type: 'price',
-    suggested_response:
-      'Ask about pricing tiers for larger volumes and payment term flexibility',
-    recommended_next_move:
-      'Negotiate volume discounts and explore bulk pricing options',
-  });
+  return {
+    transcript: [
+      {
+        speaker: 'seller' as const,
+        text: "Thanks for coming in today. I understand you're looking at bulk purchasing for your retail chain?",
+        timestamp: Date.now() - 5000,
+      },
+      {
+        speaker: 'user' as const,
+        text: "Yes, we're expanding our electronics section and need competitive pricing on smartphones.",
+        timestamp: Date.now() - 4000,
+      },
+      {
+        speaker: 'seller' as const,
+        text: 'Great! Our latest iPhone models start at $800 per unit for orders over 100 units. What kind of volume are you thinking?',
+        timestamp: Date.now() - 3000,
+      },
+    ] as TranscriptEntry[],
+    suggestion: {
+      motivation_level: 7,
+      pain_points: ['High unit price', 'Volume requirements'],
+      objection_detected: true,
+      objection_type: 'price',
+      suggested_response:
+        'Ask about pricing tiers for larger volumes and payment term flexibility',
+      recommended_next_move:
+        'Negotiate volume discounts and explore bulk pricing options',
+    } as AISuggestion,
+  };
+}
+
+export default async function TestPage() {
+  const { transcript, suggestion } = await getTestData();
 
   return (
     <main className="p-4 max-w-6xl mx-auto">

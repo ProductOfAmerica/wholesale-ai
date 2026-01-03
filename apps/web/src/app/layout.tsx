@@ -1,5 +1,7 @@
 import './globals.css';
 import type { Metadata } from 'next';
+import Link from 'next/link';
+import { Button } from '@/components/ui/button';
 
 export const metadata: Metadata = {
   title: 'Wholesale AI - Negotiation Copilot',
@@ -14,7 +16,27 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <nav className="border-b bg-background">
+          <div className="max-w-7xl mx-auto flex items-center justify-between p-4">
+            <Link href="/" className="text-xl font-bold text-foreground">
+              Wholesale AI Copilot
+            </Link>
+            <div className="flex gap-2">
+              <Button variant="ghost" asChild>
+                <Link href="/call">Text Simulation</Link>
+              </Button>
+              <Button variant="ghost" asChild>
+                <Link href="/call/real-audio">🎙️ Real Audio</Link>
+              </Button>
+              <Button variant="ghost" asChild>
+                <Link href="/test">Test Page</Link>
+              </Button>
+            </div>
+          </div>
+        </nav>
+        {children}
+      </body>
     </html>
   );
 }

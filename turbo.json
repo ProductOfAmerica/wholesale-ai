@@ -4,33 +4,60 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "env": ["ANTHROPIC_API_KEY", "DEEPGRAM_API_KEY", "FRONTEND_URL"],
-      "inputs": ["$TURBO_DEFAULT$", ".env*"],
-      "outputs": ["dist/**"]
+      "inputs": ["$TURBO_DEFAULT$"],
+      "outputs": ["dist/**", ".next/**", "!.next/cache/**"]
     },
     "@wholesale-ai/web#build": {
       "dependsOn": ["^build"],
-      "env": ["ANTHROPIC_API_KEY", "DEEPGRAM_API_KEY", "FRONTEND_URL"],
-      "inputs": ["$TURBO_DEFAULT$", ".env*"],
+      "env": ["DEEPGRAM_API_KEY", "NEXT_PUBLIC_SOCKET_URL"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        ".env.production.local",
+        ".env.local",
+        ".env.production", 
+        ".env"
+      ],
       "outputs": [".next/**", "!.next/cache/**"]
     },
     "@wholesale-ai/server#build": {
       "dependsOn": ["^build"],
       "env": ["ANTHROPIC_API_KEY", "DEEPGRAM_API_KEY", "FRONTEND_URL", "PORT"],
-      "inputs": ["$TURBO_DEFAULT$", ".env*"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        ".env.production.local",
+        ".env.local", 
+        ".env.production",
+        ".env"
+      ],
       "outputs": ["dist/**"]
     },
     "dev": {
       "cache": false,
       "persistent": true
     },
-    "dev:web": {
+    "@wholesale-ai/web#dev": {
       "cache": false,
-      "persistent": true
+      "persistent": true,
+      "env": ["DEEPGRAM_API_KEY", "NEXT_PUBLIC_SOCKET_URL"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        ".env.development.local",
+        ".env.local",
+        ".env.development",
+        ".env"
+      ]
     },
-    "dev:server": {
-      "cache": false,
-      "persistent": true
+    "@wholesale-ai/server#dev": {
+      "cache": false, 
+      "persistent": true,
+      "env": ["ANTHROPIC_API_KEY", "DEEPGRAM_API_KEY", "FRONTEND_URL", "PORT"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        ".env.development.local",
+        ".env.local",
+        ".env.development", 
+        ".env"
+      ]
     },
     "check": {
       "dependsOn": ["^build"],

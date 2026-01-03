@@ -1,7 +1,12 @@
 import { createServer } from 'node:http';
 import type { AISuggestion, TranscriptEntry } from '@wholesale-ai/shared';
+import { config } from 'dotenv';
 import { Server } from 'socket.io';
+import { WebSocket } from 'ws';
 import { analyzeConversation } from './lib/ai-analysis.js';
+
+// Load environment variables from local .env.local file
+config({ path: '.env.local' });
 
 const port = parseInt(process.env.PORT || '3001', 10);
 const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
@@ -23,6 +28,9 @@ const io = new Server(httpServer, {
 // Store conversation history per socket
 const conversationHistory = new Map<string, TranscriptEntry[]>();
 
+// Store Deepgram WebSocket connections per socket
+const deepgramConnections = new Map<string, WebSocket>();
+
 // Socket.io event handling
 io.on('connection', (socket) => {
   console.log(`Client connected: ${socket.id}`);
@@ -40,7 +48,127 @@ io.on('connection', (socket) => {
 
   socket.on('end_call', () => {
     console.log(`Call ended by ${socket.id}`);
-    // Keep history until socket disconnects
+    // Close Deepgram connection if exists
+    const deepgramWS = deepgramConnections.get(socket.id);
+    if (deepgramWS) {
+      deepgramWS.send(JSON.stringify({ type: 'CloseStream' }));
+      deepgramWS.close();
+      deepgramConnections.delete(socket.id);
+      console.log(`Deepgram WebSocket closed for ${socket.id}`);
+    }
+  });
+
+  // Handle Deepgram WebSocket connection
+  socket.on(
+    'deepgram_connect',
+    (config: { model: string; encoding: string; sampleRate: number }) => {
+      const apiKey = process.env.DEEPGRAM_API_KEY;
+      if (!apiKey) {
+        socket.emit('deepgram_error', {
+          error: 'Deepgram API key not configured',
+        });
+        return;
+      }
+
+      console.log(`Starting Deepgram WebSocket for ${socket.id}`, config);
+
+      const wsUrl = `wss://api.deepgram.com/v2/listen?model=${config.model}&encoding=${config.encoding}&sample_rate=${config.sampleRate}`;
+
+      const deepgramWS = new WebSocket(wsUrl, {
+        headers: {
+          Authorization: `token ${apiKey}`,
+        },
+      });
+
+      deepgramWS.on('open', () => {
+        console.log(`Deepgram WebSocket connected for ${socket.id}`);
+        deepgramConnections.set(socket.id, deepgramWS);
+        socket.emit('deepgram_connected');
+      });
+
+      deepgramWS.on('message', (data: Buffer) => {
+        try {
+          const message = JSON.parse(data.toString());
+          console.log(`Deepgram message for ${socket.id}:`, message.type);
+
+          // Forward Deepgram messages to client
+          socket.emit('deepgram_message', message);
+
+          // Convert Deepgram transcription to our format
+          if (
+            message.type === 'Results' &&
+            message.channel?.alternatives?.[0]?.transcript
+          ) {
+            const transcript = message.channel.alternatives[0].transcript;
+            if (transcript.trim()) {
+              const transcriptEntry: TranscriptEntry = {
+                speaker: 'seller', // Assume all audio is from seller for now
+                text: transcript,
+                timestamp: Date.now(),
+              };
+
+              // Add to conversation history
+              const history = conversationHistory.get(socket.id) || [];
+              history.push(transcriptEntry);
+              conversationHistory.set(socket.id, history);
+
+              // Send transcript update to client
+              socket.emit('transcript_update', transcriptEntry);
+
+              // Run AI analysis
+              if (history.length > 0) {
+                analyzeConversation(history, transcript)
+                  .then((analysisResult) => {
+                    console.log('AI Analysis Result:', analysisResult);
+                    socket.emit('ai_suggestion', analysisResult);
+                  })
+                  .catch((error) => {
+                    console.error('AI Analysis failed:', error);
+                    socket.emit('ai_suggestion', {
+                      motivation_level: 5,
+                      pain_points: [],
+                      objection_detected: false,
+                      suggested_response: 'Continue the conversation.',
+                      recommended_next_move: 'Ask follow-up questions.',
+                      error: 'AI analysis temporarily unavailable',
+                    });
+                  });
+              }
+            }
+          }
+        } catch (error) {
+          console.error('Error parsing Deepgram message:', error);
+        }
+      });
+
+      deepgramWS.on('error', (error: Error) => {
+        console.error(`Deepgram WebSocket error for ${socket.id}:`, error);
+        socket.emit('deepgram_error', { error: error.message });
+      });
+
+      deepgramWS.on('close', (code: number, reason: Buffer) => {
+        console.log(
+          `Deepgram WebSocket closed for ${socket.id}: ${code} ${reason}`,
+        );
+        deepgramConnections.delete(socket.id);
+        socket.emit('deepgram_disconnected', {
+          code,
+          reason: reason.toString(),
+        });
+      });
+    },
+  );
+
+  // Handle audio data forwarding to Deepgram
+  socket.on('deepgram_audio', (audioData: Buffer) => {
+    const deepgramWS = deepgramConnections.get(socket.id);
+    if (deepgramWS && deepgramWS.readyState === WebSocket.OPEN) {
+      deepgramWS.send(audioData);
+    } else {
+      console.warn(
+        `Cannot send audio for ${socket.id}: Deepgram WebSocket not connected`,
+      );
+    }
   });
 
   // Handle text simulation for testing
@@ -162,6 +290,16 @@ io.on('connection', (socket) => {
 
   socket.on('disconnect', (reason) => {
     console.log(`Client disconnected: ${socket.id} (${reason})`);
+
+    // Clean up Deepgram connection
+    const deepgramWS = deepgramConnections.get(socket.id);
+    if (deepgramWS) {
+      deepgramWS.send(JSON.stringify({ type: 'CloseStream' }));
+      deepgramWS.close();
+      deepgramConnections.delete(socket.id);
+      console.log(`Cleaned up Deepgram WebSocket for ${socket.id}`);
+    }
+
     // Clean up conversation history
     conversationHistory.delete(socket.id);
   });

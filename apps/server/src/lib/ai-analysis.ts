@@ -46,8 +46,19 @@ let client: Anthropic | null = null;
 
 function getClient(): Anthropic {
   if (!client) {
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+
+    if (!apiKey) {
+      throw new Error('ANTHROPIC_API_KEY environment variable is not set');
+    }
+
+    console.log(
+      'Initializing Anthropic client with API key:',
+      `${apiKey.substring(0, 20)}...`,
+    );
+
     client = new Anthropic({
-      apiKey: process.env.ANTHROPIC_API_KEY,
+      apiKey,
     });
   }
   return client;
@@ -72,10 +83,12 @@ Key areas to analyze:
 1. Motivation Level (1-10): How motivated is the seller to sell quickly?
 2. Pain Points: What problems/pressures is the seller facing?
 3. Objection Detection: Is the seller raising objections?
-4. Strategic Response: What should the wholesaler say next?
+4. Strategic Response: What should the wholesaler say next? (MUST be under 200 characters)
 5. Next Move: What action should the wholesaler take?
 
 Objection types include: price, timeline, process, trust, condition, competition
+
+CRITICAL: Keep suggested_response under 200 characters. Be concise and direct.
 
 Respond ONLY with valid JSON matching the exact schema provided.`;
 
@@ -92,7 +105,7 @@ export async function analyzeConversation(
     );
 
     const response = await anthropic.messages.create({
-      model: 'claude-3-5-sonnet-20241022',
+      model: 'claude-haiku-4-5-20251001',
       max_tokens: 1000,
       messages: [
         {
@@ -111,8 +124,21 @@ export async function analyzeConversation(
     );
 
     if (toolResult?.type === 'tool_use' && 'input' in toolResult) {
+      // Ensure suggested_response is within character limit
+      const input = toolResult.input as Record<string, unknown>;
+      if (
+        typeof input.suggested_response === 'string' &&
+        input.suggested_response.length > 200
+      ) {
+        input.suggested_response = `${input.suggested_response.substring(0, 197)}...`;
+        console.log(
+          'Truncated suggested_response to fit 200 char limit:',
+          input.suggested_response,
+        );
+      }
+
       // Validate with Zod before returning
-      return AnalysisSchema.parse(toolResult.input);
+      return AnalysisSchema.parse(input);
     } else {
       throw new Error('No analysis result found in response');
     }

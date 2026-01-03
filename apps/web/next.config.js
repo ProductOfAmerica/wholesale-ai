@@ -4,6 +4,7 @@ const nextConfig = {
   typescript: {
     tsconfigPath: './tsconfig.json',
   },
+  cacheComponents: true,
 };
 
 module.exports = nextConfig;

@@ -1,6 +1,7 @@
 import Link from 'next/link';
 
-export default function HomePage() {
+export default async function HomePage() {
+  'use cache';
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-8">
       <div className="max-w-4xl mx-auto text-center">

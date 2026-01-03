@@ -17,7 +17,11 @@
       "Bash(biome check:*)",
       "Bash(pnpm turbo run:*)",
       "Bash(pnpm lint:fix:*)",
-      "Bash(pnpm lint:*)"
+      "Bash(pnpm lint:*)",
+      "mcp__playwright__browser_navigate",
+      "mcp__playwright__browser_click",
+      "Bash(curl:*)",
+      "mcp__playwright__browser_console_messages"
     ],
     "deny": [],
     "ask": []

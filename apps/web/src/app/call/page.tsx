@@ -1,11 +1,22 @@
 'use client';
 
 import type { AISuggestion, TranscriptEntry } from '@wholesale-ai/shared';
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { io, type Socket } from 'socket.io-client';
 import { AISuggestions } from '@/components/AISuggestions';
 import { LiveTranscript } from '@/components/LiveTranscript';
 import { MotivationGauge } from '@/components/MotivationGauge';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 
 export default function CallPage() {
   const [socket, setSocket] = useState<Socket | null>(null);
@@ -20,8 +31,10 @@ export default function CallPage() {
   const [aiLoading, setAiLoading] = useState(false);
 
   useEffect(() => {
-    // Connect to Socket.io server (will be on different port in monorepo)
-    const socketInstance = io('http://localhost:3001');
+    // Connect to Socket.io server using environment variable
+    const socketUrl =
+      process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3001';
+    const socketInstance = io(socketUrl);
     setSocket(socketInstance);
 
     socketInstance.on('connect', () => {
@@ -86,99 +99,143 @@ export default function CallPage() {
 
   return (
     <main className="p-4 max-w-6xl mx-auto">
-      <h1 className="text-3xl font-bold mb-6 text-gray-900">
-        AI Negotiation Copilot
-      </h1>
+      <h1 className="text-3xl font-bold mb-6">AI Negotiation Copilot</h1>
 
       {/* Status and Controls */}
-      <div className="mb-8 p-4 bg-gray-50 rounded-lg border border-gray-200">
-        <div className="flex justify-between items-center mb-4">
-          <div className="text-base font-medium">
-            Status: {connected ? '🟢 Connected' : '🔴 Disconnected'}
+      <Card className="mb-8">
+        <CardContent className="pt-6">
+          <div className="flex justify-between items-center">
+            <div className="flex items-center gap-2">
+              <span className="text-base font-medium">Status:</span>
+              <Badge variant={connected ? 'default' : 'destructive'}>
+                {connected ? '🟢 Connected' : '🔴 Disconnected'}
+              </Badge>
+            </div>
+
+            <div className="flex gap-2">
+              <Button
+                onClick={handleStartCall}
+                disabled={!connected}
+                variant="default"
+              >
+                Start Call
+              </Button>
+
+              <Button
+                onClick={handleRunDemo}
+                disabled={!connected}
+                variant="secondary"
+              >
+                Run Demo
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Main Interface */}
+      <Suspense
+        fallback={
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+            <div className="lg:col-span-2">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Live Transcript</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="h-80 flex items-center justify-center text-muted-foreground">
+                    Loading transcript...
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+            <div className="space-y-6">
+              <Card>
+                <CardContent className="pt-6">
+                  <div className="h-32 flex items-center justify-center text-muted-foreground">
+                    Loading motivation gauge...
+                  </div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader>
+                  <CardTitle>AI Suggestions</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="h-80 flex items-center justify-center text-muted-foreground">
+                    Loading AI suggestions...
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        }
+      >
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+          {/* Left Column: Live Transcript */}
+          <div className="lg:col-span-2">
+            <LiveTranscript transcript={transcript} />
+          </div>
+
+          {/* Right Column: AI Analysis */}
+          <div className="space-y-6">
+            {/* Motivation Gauge */}
+            <Card>
+              <CardContent className="pt-6">
+                <MotivationGauge
+                  level={currentSuggestion?.motivation_level || 0}
+                  animated={true}
+                />
+              </CardContent>
+            </Card>
+
+            {/* AI Suggestions */}
+            <AISuggestions suggestion={currentSuggestion} loading={aiLoading} />
+          </div>
+        </div>
+      </Suspense>
+
+      {/* Text Simulation Controls */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Text Simulation (for testing)</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div>
+            <Select
+              value={selectedSpeaker}
+              onValueChange={(value) =>
+                setSelectedSpeaker(value as 'seller' | 'user')
+              }
+            >
+              <SelectTrigger className="w-48">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="seller">Seller</SelectItem>
+                <SelectItem value="user">You (Wholesaler)</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
 
           <div className="flex gap-4">
-            <button
-              type="button"
-              onClick={handleStartCall}
-              disabled={!connected}
-              className="bg-blue-600 disabled:bg-gray-400 text-white px-4 py-2 rounded-md font-medium hover:bg-blue-700 disabled:cursor-not-allowed"
-            >
-              Start Call
-            </button>
-
-            <button
-              type="button"
-              onClick={handleRunDemo}
-              disabled={!connected}
-              className="bg-green-600 disabled:bg-gray-400 text-white px-4 py-2 rounded-md font-medium hover:bg-green-700 disabled:cursor-not-allowed"
-            >
-              Run Demo
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Main Interface */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
-        {/* Left Column: Live Transcript */}
-        <div className="lg:col-span-2">
-          <LiveTranscript transcript={transcript} />
-        </div>
-
-        {/* Right Column: AI Analysis */}
-        <div className="space-y-6">
-          {/* Motivation Gauge */}
-          <div className="p-4 bg-white rounded-lg border border-gray-200">
-            <MotivationGauge
-              level={currentSuggestion?.motivation_level || 0}
-              animated={true}
+            <Input
+              type="text"
+              value={simulationText}
+              onChange={(e) => setSimulationText(e.target.value)}
+              placeholder="Enter speech to simulate..."
+              className="flex-1"
+              onKeyDown={(e) => e.key === 'Enter' && handleSimulateSpeech()}
             />
+            <Button
+              onClick={handleSimulateSpeech}
+              disabled={!connected || !simulationText.trim()}
+            >
+              Send
+            </Button>
           </div>
-
-          {/* AI Suggestions */}
-          <AISuggestions suggestion={currentSuggestion} loading={aiLoading} />
-        </div>
-      </div>
-
-      {/* Text Simulation Controls */}
-      <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
-        <h3 className="text-lg font-semibold mb-4 text-gray-700">
-          Text Simulation (for testing)
-        </h3>
-
-        <div className="mb-4">
-          <select
-            value={selectedSpeaker}
-            onChange={(e) =>
-              setSelectedSpeaker(e.target.value as 'seller' | 'user')
-            }
-            className="mr-4 p-2 border border-gray-300 rounded-md bg-white"
-          >
-            <option value="seller">Seller</option>
-            <option value="user">You (Wholesaler)</option>
-          </select>
-        </div>
-
-        <div className="flex gap-4">
-          <input
-            type="text"
-            value={simulationText}
-            onChange={(e) => setSimulationText(e.target.value)}
-            placeholder="Enter speech to simulate..."
-            className="flex-1 p-3 border border-gray-300 rounded-md text-sm"
-            onKeyPress={(e) => e.key === 'Enter' && handleSimulateSpeech()}
-          />
-          <button
-            type="button"
-            onClick={handleSimulateSpeech}
-            disabled={!connected || !simulationText.trim()}
-            className="bg-blue-600 disabled:bg-gray-400 text-white px-6 py-3 rounded-md font-medium text-sm hover:bg-blue-700 disabled:cursor-not-allowed"
-          >
-            Send
-          </button>
-        </div>
-      </div>
+        </CardContent>
+      </Card>
     </main>
   );
 }
