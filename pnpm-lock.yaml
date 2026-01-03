@@ -7,10 +7,6 @@ settings:
 importers:
 
   .:
-    dependencies:
-      ws:
-        specifier: ^8.18.3
-        version: 8.18.3
     devDependencies:
       '@biomejs/biome':
         specifier: ^2.3.10
@@ -27,9 +23,6 @@ importers:
       typescript:
         specifier: ^5.7.2
         version: 5.9.3
-      vitest:
-        specifier: ^2.1.8
-        version: 2.1.9(@types/node@22.19.3)
 
   apps/server:
     dependencies:
@@ -54,6 +47,9 @@ importers:
       twilio:
         specifier: ^5.11.1
         version: 5.11.1
+      ws:
+        specifier: ^8.18.3
+        version: 8.18.3
       zod:
         specifier: ^3.23.8
         version: 3.25.76
