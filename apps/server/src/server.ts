@@ -32,8 +32,8 @@ const env = validateEnv([
 ] as const);
 
 const port = parseInt(env.PORT, 10);
-const frontendUrl = env.FRONTEND_URL;
-const serverUrl = env.SERVER_URL;
+const frontendUrl = env.FRONTEND_URL.replace(/\/$/, '');
+const serverUrl = env.SERVER_URL.replace(/\/$/, '');
 
 const conversationHistory = new Map<string, TranscriptEntry[]>();
 const deepgramConnections = new Map<string, WebSocket>();

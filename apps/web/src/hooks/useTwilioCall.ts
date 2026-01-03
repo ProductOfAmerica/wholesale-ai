@@ -48,7 +48,7 @@ function clearActiveCall(): void {
 
 async function cleanupOrphanedCall(callSid: string): Promise<void> {
   try {
-    const serverUrl = process.env.NEXT_PUBLIC_SOCKET_URL;
+    const serverUrl = process.env.NEXT_PUBLIC_SOCKET_URL?.replace(/\/$/, '');
     await fetch(`${serverUrl}/twilio/end-call`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -142,7 +142,7 @@ export function useTwilioCall(socket: Socket | null) {
   useEffect(() => {
     async function initDevice() {
       try {
-        const serverUrl = process.env.NEXT_PUBLIC_SOCKET_URL;
+        const serverUrl = process.env.NEXT_PUBLIC_SOCKET_URL?.replace(/\/$/, '');
         if (!serverUrl) {
           throw new Error('NEXT_PUBLIC_SOCKET_URL not configured');
         }
