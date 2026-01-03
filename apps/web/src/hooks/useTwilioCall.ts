@@ -142,7 +142,10 @@ export function useTwilioCall(socket: Socket | null) {
   useEffect(() => {
     async function initDevice() {
       try {
-        const serverUrl = process.env.NEXT_PUBLIC_SOCKET_URL?.replace(/\/$/, '');
+        const serverUrl = process.env.NEXT_PUBLIC_SOCKET_URL?.replace(
+          /\/$/,
+          ''
+        );
         if (!serverUrl) {
           throw new Error('NEXT_PUBLIC_SOCKET_URL not configured');
         }
