@@ -787,10 +787,19 @@ async function handleTwilioCallStart(
       'outbound'
     );
 
-    socket.emit('twilio_call_initiated', {
-      callSid: result.callSid,
-      status: result.status,
-    });
+    socket
+      .timeout(5000)
+      .emit(
+        'twilio_call_initiated',
+        { callSid: result.callSid, status: result.status },
+        (err: Error | null) => {
+          if (err) {
+            console.warn(
+              `Client did not acknowledge twilio_call_initiated: ${err.message}`
+            );
+          }
+        }
+      );
 
     console.log(`Call initiated: ${result.callSid}`);
   } catch (error) {
@@ -812,7 +821,19 @@ async function handleTwilioCallEnd(
     activeCallSids.delete(socket.id);
     closeDeepgramConnection(socket.id);
 
-    socket.emit('twilio_call_ended', { callSid: data.callSid });
+    socket
+      .timeout(5000)
+      .emit(
+        'twilio_call_ended',
+        { callSid: data.callSid },
+        (err: Error | null) => {
+          if (err) {
+            console.warn(
+              `Client did not acknowledge twilio_call_ended: ${err.message}`
+            );
+          }
+        }
+      );
   } catch (error) {
     console.error('Failed to end call:', error);
     socket.emit('twilio_error', {
@@ -897,6 +918,30 @@ io.on('connection', (socket) => {
   );
   socket.on('disconnect', (reason) => handleDisconnect(socket, reason));
 });
+
+function gracefulShutdown(signal: string): void {
+  console.log(`${signal} received, shutting down gracefully...`);
+
+  for (const [socketId] of deepgramConnections) {
+    closeDeepgramConnection(socketId);
+  }
+
+  io.close(() => {
+    console.log('Socket.io server closed');
+    httpServer.close(() => {
+      console.log('HTTP server closed');
+      process.exit(0);
+    });
+  });
+
+  setTimeout(() => {
+    console.error('Forced shutdown after timeout');
+    process.exit(1);
+  }, 10000);
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 if (process.env.NODE_ENV === 'production') {
   process.on('uncaughtException', (err) => {

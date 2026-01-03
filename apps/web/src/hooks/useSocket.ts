@@ -42,6 +42,18 @@ export function useSocket(): {
       setConnected(false);
     });
 
+    socketInstance.on('connect_error', (error) => {
+      if (socketInstance.active) {
+        console.log('Connection error, auto-reconnecting:', error.message);
+      } else {
+        console.error('Connection denied by server:', error.message);
+      }
+    });
+
+    socketInstance.on('error', (error) => {
+      console.error('Socket error:', error);
+    });
+
     return () => {
       socketInstance.disconnect();
     };
