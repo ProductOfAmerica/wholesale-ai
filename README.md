@@ -12,7 +12,7 @@
 [![pnpm](https://img.shields.io/badge/pnpm-9.0-F69220?style=flat-square&logo=pnpm&logoColor=white)](https://pnpm.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](https://opensource.org/licenses/MIT)
 
-[Features](#-features) • [Quick Start](#-quick-start) • [Architecture](#-architecture) • [API Reference](#-api-reference)
+[Features](#-features) • [Quick Start](#-quick-start) • [Architecture](#️-architecture) • [API Reference](#-api-reference)
 
 </div>
 
