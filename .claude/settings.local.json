@@ -21,7 +21,9 @@
       "mcp__playwright__browser_navigate",
       "mcp__playwright__browser_click",
       "Bash(curl:*)",
-      "mcp__playwright__browser_console_messages"
+      "mcp__playwright__browser_console_messages",
+      "mcp__next-devtools-mcp__nextjs_index",
+      "mcp__next-devtools-mcp__nextjs_call"
     ],
     "deny": [],
     "ask": []
