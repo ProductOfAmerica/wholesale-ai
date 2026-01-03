@@ -44,15 +44,15 @@ function WarningHeader() {
 function WarningContent() {
   return (
     <p className="mt-2 text-yellow-700 text-sm">
-      Waiting for Socket.io connection to enable real-time audio
-      transcription via WebSocket proxy.
+      Waiting for Socket.io connection to enable real-time audio transcription
+      via WebSocket proxy.
     </p>
   );
 }
 
 function EnvironmentWarning({ show }: { show: boolean }) {
   if (!show) return null;
-  
+
   return (
     <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
       <WarningHeader />
@@ -173,7 +173,7 @@ export function AudioShell() {
     } catch (error) {
       console.error('Failed to start real audio call:', error);
       alert(
-        `Failed to start call: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        `Failed to start call: ${error instanceof Error ? error.message : 'Unknown error'}`
       );
       setIsCallActive(false);
     }

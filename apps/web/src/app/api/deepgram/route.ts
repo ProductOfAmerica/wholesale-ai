@@ -9,6 +9,6 @@ export async function GET() {
       recommendation:
         'Use /api/deepgram-token endpoint for secure token-based access',
     },
-    { status: 403 },
+    { status: 403 }
   );
 }

@@ -26,7 +26,7 @@ export function CallShell() {
     useState<AISuggestion | null>(null);
   const [simulationText, setSimulationText] = useState('');
   const [selectedSpeaker, setSelectedSpeaker] = useState<'seller' | 'user'>(
-    'seller',
+    'seller'
   );
   const [aiLoading, setAiLoading] = useState(false);
 

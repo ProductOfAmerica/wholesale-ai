@@ -76,7 +76,7 @@ export function MotivationGauge({
           value={percentage}
           className={cn(
             'h-3',
-            animated && 'transition-all duration-700 ease-in-out',
+            animated && 'transition-all duration-700 ease-in-out'
           )}
         />
 

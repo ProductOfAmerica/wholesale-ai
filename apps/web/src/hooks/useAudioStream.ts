@@ -2,6 +2,7 @@
 
 import { useCallback, useRef, useState } from 'react';
 
+// Type definitions
 interface AudioStreamConfig {
   sampleRate: number;
   channelCount: number;
@@ -22,7 +23,7 @@ export function useAudioStream(
     channelCount: 1,
     echoCancellation: true,
     noiseSuppression: true,
-  },
+  }
 ) {
   const [state, setState] = useState<AudioStreamState>({
     isRecording: false,
@@ -44,17 +45,18 @@ export function useAudioStream(
     setState((prev) => ({ ...prev, error: null }));
   }, []);
 
-  const requestMicrophoneAccess = useCallback(async (): Promise<MediaStream> => {
-    return navigator.mediaDevices.getUserMedia({
-      audio: {
-        sampleRate: config.sampleRate,
-        channelCount: config.channelCount,
-        echoCancellation: config.echoCancellation,
-        noiseSuppression: config.noiseSuppression,
-        autoGainControl: true,
-      },
-    });
-  }, [config]);
+  const requestMicrophoneAccess =
+    useCallback(async (): Promise<MediaStream> => {
+      return navigator.mediaDevices.getUserMedia({
+        audio: {
+          sampleRate: config.sampleRate,
+          channelCount: config.channelCount,
+          echoCancellation: config.echoCancellation,
+          noiseSuppression: config.noiseSuppression,
+          autoGainControl: true,
+        },
+      });
+    }, [config]);
 
   const createDataHandler = useCallback((onData: (chunk: Blob) => void) => {
     return (event: BlobEvent) => {
@@ -75,24 +77,24 @@ export function useAudioStream(
     };
   }, []);
 
-  const setupMediaRecorder = useCallback((
-    stream: MediaStream,
-    onData: (chunk: Blob) => void,
-  ): MediaRecorder => {
-    const mediaRecorder = new MediaRecorder(stream, {
-      mimeType: 'audio/webm;codecs=opus',
-      audioBitsPerSecond: 128000,
-    });
+  const setupMediaRecorder = useCallback(
+    (stream: MediaStream, onData: (chunk: Blob) => void): MediaRecorder => {
+      const mediaRecorder = new MediaRecorder(stream, {
+        mimeType: 'audio/webm;codecs=opus',
+        audioBitsPerSecond: 128000,
+      });
 
-    mediaStreamRef.current = stream;
-    onDataAvailable.current = onData;
-    mediaRecorderRef.current = mediaRecorder;
+      mediaStreamRef.current = stream;
+      onDataAvailable.current = onData;
+      mediaRecorderRef.current = mediaRecorder;
 
-    mediaRecorder.ondataavailable = createDataHandler(onData);
-    mediaRecorder.onerror = createErrorHandler();
+      mediaRecorder.ondataavailable = createDataHandler(onData);
+      mediaRecorder.onerror = createErrorHandler();
 
-    return mediaRecorder;
-  }, [createDataHandler, createErrorHandler]);
+      return mediaRecorder;
+    },
+    [createDataHandler, createErrorHandler]
+  );
 
   // Set up audio level monitoring
   const setupAudioLevelMonitoring = useCallback(
@@ -141,12 +143,15 @@ export function useAudioStream(
 
       updateAudioLevel();
     },
-    [state.isRecording],
+    [state.isRecording]
   );
 
-  const setupAudioMonitoring = useCallback((stream: MediaStream) => {
-    setupAudioLevelMonitoring(stream);
-  }, [setupAudioLevelMonitoring]);
+  const setupAudioMonitoring = useCallback(
+    (stream: MediaStream) => {
+      setupAudioLevelMonitoring(stream);
+    },
+    [setupAudioLevelMonitoring]
+  );
 
   const startMediaRecorder = useCallback((mediaRecorder: MediaRecorder) => {
     // Start recording with 100ms timeslice for low latency
@@ -166,9 +171,7 @@ export function useAudioStream(
     setState((prev) => ({
       ...prev,
       error:
-        error instanceof Error
-          ? error.message
-          : 'Failed to start recording',
+        error instanceof Error ? error.message : 'Failed to start recording',
       isRecording: false,
       isConnected: false,
     }));
@@ -180,7 +183,7 @@ export function useAudioStream(
         clearErrors();
         const stream = await requestMicrophoneAccess();
         const mediaRecorder = setupMediaRecorder(stream, onData || (() => {}));
-        
+
         setupAudioMonitoring(stream);
         startMediaRecorder(mediaRecorder);
         updateRecordingState(true);
@@ -188,7 +191,15 @@ export function useAudioStream(
         handleRecordingError(error);
       }
     },
-    [config],
+    [
+      clearErrors,
+      requestMicrophoneAccess,
+      setupMediaRecorder,
+      setupAudioMonitoring,
+      startMediaRecorder,
+      updateRecordingState,
+      handleRecordingError,
+    ]
   );
 
   const stopRecording = useCallback(() => {

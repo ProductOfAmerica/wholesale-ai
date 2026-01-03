@@ -37,7 +37,7 @@ const getCachedToken = unstable_cache(
   {
     revalidate: 240, // Cache for 4 minutes (20 seconds before token expires)
     tags: ['deepgram-token'],
-  },
+  }
 );
 
 export async function POST() {
@@ -50,7 +50,7 @@ export async function POST() {
         error: 'Failed to generate Deepgram token',
         details: error instanceof Error ? error.message : 'Unknown error',
       },
-      { status: 500 },
+      { status: 500 }
     );
   }
 }

@@ -2,6 +2,7 @@
 
 import type { TranscriptEntry } from '@wholesale-ai/shared';
 import { useEffect, useRef } from 'react';
+
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';

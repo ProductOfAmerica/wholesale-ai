@@ -19,7 +19,10 @@ interface DeepgramMessage {
 
 interface DeepgramHandlers {
   handleConnected: (resolve?: () => void) => void;
-  handleError: (errorData: { error: string }, reject?: (error: Error) => void) => void;
+  handleError: (
+    errorData: { error: string },
+    reject?: (error: Error) => void
+  ) => void;
   handleDisconnected: (data: { code: number; reason: string }) => void;
   handleMessage: (message: DeepgramMessage) => void;
 }
@@ -44,10 +47,10 @@ function processTranscriptResult(message: DeepgramMessage): {
   isFinal: boolean;
 } {
   if (message.type !== 'Results') return { isFinal: false };
-  
+
   const transcript = message.channel?.alternatives?.[0]?.transcript;
   if (!transcript) return { isFinal: false };
-  
+
   return {
     transcript,
     isFinal: message.is_final || false,
@@ -59,7 +62,7 @@ function processTurnInfo(message: DeepgramMessage): {
   turnId?: string;
 } {
   if (message.type !== 'TurnInfo') return {};
-  
+
   return {
     speaker: message.data?.speaker,
     turnId: message.data?.turn_id,
@@ -69,13 +72,14 @@ function processTurnInfo(message: DeepgramMessage): {
 function setupDeepgramConnection(
   socket: Socket,
   config: DeepgramConfig,
-  handlers: DeepgramHandlers,
+  handlers: DeepgramHandlers
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     // Set up event listeners
     socket.once('deepgram_connected', () => handlers.handleConnected(resolve));
-    socket.on('deepgram_error', (errorData: { error: string }) => 
-      handlers.handleError(errorData, reject));
+    socket.on('deepgram_error', (errorData: { error: string }) =>
+      handlers.handleError(errorData, reject)
+    );
     socket.on('deepgram_disconnected', handlers.handleDisconnected);
     socket.on('deepgram_message', handlers.handleMessage);
 
@@ -95,7 +99,7 @@ function setupDeepgramConnection(
 
 export function useDeepgramTranscriptProxy(
   socket: Socket | null,
-  config: DeepgramConfig,
+  config: DeepgramConfig
 ): DeepgramTranscriptProxy {
   const [isConnected, setIsConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -114,7 +118,10 @@ export function useDeepgramTranscriptProxy(
       resolve?.();
     };
 
-    const handleError = (errorData: { error: string }, reject?: (error: Error) => void) => {
+    const handleError = (
+      errorData: { error: string },
+      reject?: (error: Error) => void
+    ) => {
       console.error('Deepgram proxy error:', errorData.error);
       setError(errorData.error);
       setIsConnected(false);
@@ -197,7 +204,7 @@ export function useDeepgramTranscriptProxy(
           console.error('Error converting audio blob:', err);
         });
     },
-    [socket, isConnected],
+    [socket, isConnected]
   );
 
   const clearTranscript = useCallback(() => {
@@ -211,7 +218,7 @@ export function useDeepgramTranscriptProxy(
     (callback: (entry: TranscriptEntry) => void) => {
       onTranscriptUpdateRef.current = callback;
     },
-    [],
+    []
   );
 
   // Listen for transcript updates from the server (processed Deepgram results)

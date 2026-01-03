@@ -6,7 +6,7 @@ export async function GET() {
   if (!deepgramApiKey) {
     return NextResponse.json(
       { error: 'Deepgram API key not configured' },
-      { status: 500 },
+      { status: 500 }
     );
   }
 
@@ -29,7 +29,7 @@ export async function GET() {
           details: errorText,
           keyPrefix: `${deepgramApiKey.substring(0, 10)}...`,
         },
-        { status: 400 },
+        { status: 400 }
       );
     }
 
@@ -46,7 +46,7 @@ export async function GET() {
         details: error instanceof Error ? error.message : 'Unknown error',
         keyPrefix: `${deepgramApiKey.substring(0, 10)}...`,
       },
-      { status: 500 },
+      { status: 500 }
     );
   }
 }

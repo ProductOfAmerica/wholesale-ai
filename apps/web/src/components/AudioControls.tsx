@@ -3,19 +3,22 @@
 import { useCallback, useState } from 'react';
 
 // Styling utility functions
-function getRecordingButtonStyles(isRecording: boolean, hasError: boolean): string {
+function getRecordingButtonStyles(
+  isRecording: boolean,
+  hasError: boolean
+): string {
   const baseStyles = `
     relative flex items-center justify-center w-12 h-12 rounded-full
     transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2
     text-white
   `;
-  
+
   const recordingStyles = isRecording
     ? 'bg-red-500 hover:bg-red-600 focus:ring-red-500 animate-pulse'
     : 'bg-blue-500 hover:bg-blue-600 focus:ring-blue-500';
-    
+
   const errorStyles = hasError ? 'opacity-50 cursor-not-allowed' : '';
-  
+
   return `${baseStyles} ${recordingStyles} ${errorStyles}`;
 }
 
@@ -25,13 +28,13 @@ function getMuteButtonStyles(isMuted: boolean, isRecording: boolean): string {
     transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2
     text-gray-700
   `;
-  
+
   const muteStyles = isMuted
     ? 'bg-gray-500 hover:bg-gray-600 focus:ring-gray-500'
     : 'bg-gray-300 hover:bg-gray-400 focus:ring-gray-500';
-    
+
   const disabledStyles = !isRecording ? 'opacity-50 cursor-not-allowed' : '';
-  
+
   return `${baseStyles} ${muteStyles} ${disabledStyles}`;
 }
 

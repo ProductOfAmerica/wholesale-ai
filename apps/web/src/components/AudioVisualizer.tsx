@@ -18,7 +18,7 @@ function useAudioColors(audioLevel: number) {
       fillColor:
         audioLevel > 0.7 ? '#ef4444' : audioLevel > 0.4 ? '#f59e0b' : '#10b981',
     }),
-    [audioLevel],
+    [audioLevel]
   );
 }
 
@@ -27,7 +27,7 @@ function drawWaveform(
   dataPoints: number[],
   width: number,
   height: number,
-  time: number,
+  time: number
 ) {
   const centerY = height / 2;
   ctx.beginPath();
@@ -52,7 +52,7 @@ function drawLevelIndicator(
   audioLevel: number,
   width: number,
   height: number,
-  fillColor: string,
+  fillColor: string
 ) {
   ctx.fillStyle = fillColor;
   const centerY = height / 2;
@@ -63,7 +63,7 @@ function drawLevelIndicator(
 function drawStaticLine(
   ctx: CanvasRenderingContext2D,
   width: number,
-  height: number,
+  height: number
 ) {
   ctx.strokeStyle = '#9ca3af';
   ctx.lineWidth = 1;
@@ -111,7 +111,7 @@ export function AudioVisualizer({
 
       timeRef.current += 0.1;
     },
-    [audioLevel, colors, width, height, updateWaveData],
+    [audioLevel, colors, width, height, updateWaveData]
   );
 
   const drawInactiveVisualization = useCallback(
@@ -119,7 +119,7 @@ export function AudioVisualizer({
       drawStaticLine(ctx, width, height);
       clearWaveData();
     },
-    [width, height, clearWaveData],
+    [width, height, clearWaveData]
   );
 
   useEffect(() => {
@@ -211,7 +211,7 @@ export function AudioLevelBars({
         index: i,
         id: `bar-${i}`,
       })),
-    [barCount],
+    [barCount]
   );
 
   return (

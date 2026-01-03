@@ -3,6 +3,7 @@ import type { AISuggestion, TranscriptEntry } from '@wholesale-ai/shared';
 import { config } from 'dotenv';
 import { Server } from 'socket.io';
 import { WebSocket } from 'ws';
+
 import { analyzeConversation } from './lib/ai-analysis.js';
 
 // Load environment variables from local .env.local file
@@ -32,16 +33,25 @@ const conversationHistory = new Map<string, TranscriptEntry[]>();
 const deepgramConnections = new Map<string, WebSocket>();
 
 // Helper functions for message processing
-function parseDeepgramMessage(data: Buffer): any | null {
+interface DeepgramMessage {
+  type: string;
+  channel?: {
+    alternatives?: Array<{
+      transcript: string;
+    }>;
+  };
+}
+
+function parseDeepgramMessage(data: Buffer): DeepgramMessage | null {
   try {
-    return JSON.parse(data.toString());
+    return JSON.parse(data.toString()) as DeepgramMessage;
   } catch (error) {
     console.error('Error parsing Deepgram message:', error);
     return null;
   }
 }
 
-function extractTranscript(message: any): string | null {
+function extractTranscript(message: DeepgramMessage): string | null {
   if (
     message.type === 'Results' &&
     message.channel?.alternatives?.[0]?.transcript
@@ -52,10 +62,7 @@ function extractTranscript(message: any): string | null {
   return null;
 }
 
-function createTranscriptEntry(
-  speaker: string,
-  text: string,
-): TranscriptEntry {
+function createTranscriptEntry(speaker: string, text: string): TranscriptEntry {
   return {
     speaker,
     text,
@@ -65,7 +72,7 @@ function createTranscriptEntry(
 
 function updateConversationHistory(
   socketId: string,
-  transcriptEntry: TranscriptEntry,
+  transcriptEntry: TranscriptEntry
 ): TranscriptEntry[] {
   const history = conversationHistory.get(socketId) || [];
   history.push(transcriptEntry);
@@ -76,7 +83,7 @@ function updateConversationHistory(
 async function runAIAnalysis(
   socketId: string,
   history: TranscriptEntry[],
-  transcript: string,
+  transcript: string
 ): Promise<void> {
   if (history.length === 0) return;
 
@@ -84,12 +91,12 @@ async function runAIAnalysis(
     console.log('Running AI analysis...');
     const analysisResult = await analyzeConversation(history, transcript);
     console.log('AI Analysis Result:', analysisResult);
-    
+
     const socket = io.sockets.sockets.get(socketId);
     socket?.emit('ai_suggestion', analysisResult);
   } catch (error) {
     console.error('AI Analysis failed:', error);
-    
+
     const fallbackSuggestion: AISuggestion = {
       motivation_level: 5,
       pain_points: [],
@@ -98,7 +105,7 @@ async function runAIAnalysis(
       recommended_next_move: 'Ask follow-up questions.',
       error: 'AI analysis temporarily unavailable',
     };
-    
+
     const socket = io.sockets.sockets.get(socketId);
     socket?.emit('ai_suggestion', fallbackSuggestion);
   }
@@ -107,10 +114,10 @@ async function runAIAnalysis(
 function processTranscript(socketId: string, transcript: string): void {
   const transcriptEntry = createTranscriptEntry('seller', transcript);
   const history = updateConversationHistory(socketId, transcriptEntry);
-  
+
   const socket = io.sockets.sockets.get(socketId);
   socket?.emit('transcript_update', transcriptEntry);
-  
+
   // Run AI analysis asynchronously
   runAIAnalysis(socketId, history, transcript);
 }
@@ -118,13 +125,13 @@ function processTranscript(socketId: string, transcript: string): void {
 function handleDeepgramMessage(socketId: string, data: Buffer): void {
   const message = parseDeepgramMessage(data);
   if (!message) return;
-  
+
   console.log(`Deepgram message for ${socketId}:`, message.type);
-  
+
   // Forward Deepgram messages to client
   const socket = io.sockets.sockets.get(socketId);
   socket?.emit('deepgram_message', message);
-  
+
   // Process transcript if available
   const transcript = extractTranscript(message);
   if (transcript) {
@@ -169,19 +176,19 @@ const demoMessages: DemoMessage[] = [
   },
 ];
 
-const delay = (ms: number): Promise<void> => 
-  new Promise(resolve => setTimeout(resolve, ms));
+const delay = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms));
 
 async function processDemoMessage(
   socketId: string,
-  message: DemoMessage,
+  message: DemoMessage
 ): Promise<void> {
   const transcriptEntry = createTranscriptEntry(message.speaker, message.text);
   const history = updateConversationHistory(socketId, transcriptEntry);
-  
+
   const socket = io.sockets.sockets.get(socketId);
   socket?.emit('transcript_update', transcriptEntry);
-  
+
   // Run AI analysis for seller messages
   if (message.speaker === 'seller') {
     await runAIAnalysis(socketId, history, message.text);
@@ -190,10 +197,10 @@ async function processDemoMessage(
 
 async function runDemoConversation(socketId: string): Promise<void> {
   console.log(`Running demo conversation for ${socketId}`);
-  
+
   // Clear history and start demo
   conversationHistory.set(socketId, []);
-  
+
   for (const [index, message] of demoMessages.entries()) {
     if (index > 0) {
       await delay(3000); // 3 second delays between messages
@@ -204,16 +211,16 @@ async function runDemoConversation(socketId: string): Promise<void> {
 
 async function processSimulatedSpeech(
   socketId: string,
-  data: { speaker: string; text: string },
+  data: { speaker: string; text: string }
 ): Promise<void> {
   console.log('Simulated speech:', data);
-  
+
   const transcriptEntry = createTranscriptEntry(data.speaker, data.text);
   const history = updateConversationHistory(socketId, transcriptEntry);
-  
+
   const socket = io.sockets.sockets.get(socketId);
   socket?.emit('transcript_update', transcriptEntry);
-  
+
   // Run AI analysis if it's a seller message and we have context
   if (data.speaker === 'seller' && history.length > 0) {
     await runAIAnalysis(socketId, history, data.text);
@@ -286,7 +293,7 @@ io.on('connection', (socket) => {
 
       deepgramWS.on('close', (code: number, reason: Buffer) => {
         console.log(
-          `Deepgram WebSocket closed for ${socket.id}: ${code} ${reason}`,
+          `Deepgram WebSocket closed for ${socket.id}: ${code} ${reason}`
         );
         deepgramConnections.delete(socket.id);
         socket.emit('deepgram_disconnected', {
@@ -294,7 +301,7 @@ io.on('connection', (socket) => {
           reason: reason.toString(),
         });
       });
-    },
+    }
   );
 
   // Handle audio data forwarding to Deepgram
@@ -304,18 +311,15 @@ io.on('connection', (socket) => {
       deepgramWS.send(audioData);
     } else {
       console.warn(
-        `Cannot send audio for ${socket.id}: Deepgram WebSocket not connected`,
+        `Cannot send audio for ${socket.id}: Deepgram WebSocket not connected`
       );
     }
   });
 
   // Handle text simulation for testing
-  socket.on(
-    'simulate_speech',
-    (data: { speaker: string; text: string }) => {
-      processSimulatedSpeech(socket.id, data);
-    },
-  );
+  socket.on('simulate_speech', (data: { speaker: string; text: string }) => {
+    processSimulatedSpeech(socket.id, data);
+  });
 
   // Handle demo conversation
   socket.on('run_demo', () => {

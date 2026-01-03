@@ -54,7 +54,7 @@ function getClient(): Anthropic {
 
     console.log(
       'Initializing Anthropic client with API key:',
-      `${apiKey.substring(0, 20)}...`,
+      `${apiKey.substring(0, 20)}...`
     );
 
     client = new Anthropic({
@@ -66,7 +66,7 @@ function getClient(): Anthropic {
 
 function formatConversationForPrompt(
   history: TranscriptEntry[],
-  latestStatement: string,
+  latestStatement: string
 ): string {
   const conversationText = history
     .map((entry) => `${entry.speaker}: ${entry.text}`)
@@ -94,14 +94,14 @@ Respond ONLY with valid JSON matching the exact schema provided.`;
 
 export async function analyzeConversation(
   history: TranscriptEntry[],
-  latestStatement: string,
+  latestStatement: string
 ): Promise<AISuggestion> {
   try {
     const anthropic = getClient();
 
     const conversationPrompt = formatConversationForPrompt(
       history,
-      latestStatement,
+      latestStatement
     );
 
     const response = await anthropic.messages.create({
@@ -120,7 +120,7 @@ export async function analyzeConversation(
     // Extract the tool result from the response
     const toolResult = response.content.find(
       (content) =>
-        content.type === 'tool_use' && content.name === 'provide_analysis',
+        content.type === 'tool_use' && content.name === 'provide_analysis'
     );
 
     if (toolResult?.type === 'tool_use' && 'input' in toolResult) {
@@ -133,7 +133,7 @@ export async function analyzeConversation(
         input.suggested_response = `${input.suggested_response.substring(0, 197)}...`;
         console.log(
           'Truncated suggested_response to fit 200 char limit:',
-          input.suggested_response,
+          input.suggested_response
         );
       }
 

@@ -2,6 +2,7 @@
 
 import type { AISuggestion } from '@wholesale-ai/shared';
 import { AlertTriangleIcon, MessageSquareIcon, TargetIcon } from 'lucide-react';
+
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';

@@ -1,5 +1,6 @@
 import { cacheLife } from 'next/cache';
 import { Suspense } from 'react';
+
 import { CallShell } from '@/components/CallShell';
 
 // Static shell component for PPR
