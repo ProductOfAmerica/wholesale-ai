@@ -1,167 +1,217 @@
-# Wholesale AI - Negotiation Copilot
+<div align="center">
 
-Real-time AI-powered negotiation assistance for wholesale buyers, built with Next.js 16 and Socket.io in a Turborepo monorepo.
+# Wholesale AI
+
+### Real-Time AI Negotiation Copilot for Real Estate Wholesalers
+
+[![Next.js](https://img.shields.io/badge/Next.js-16-black?style=flat-square&logo=next.js)](https://nextjs.org/)
+[![React](https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react)](https://react.dev/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.7-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Socket.io](https://img.shields.io/badge/Socket.io-4.8-010101?style=flat-square&logo=socket.io)](https://socket.io/)
+[![Turborepo](https://img.shields.io/badge/Turborepo-2.3-EF4444?style=flat-square&logo=turborepo&logoColor=white)](https://turbo.build/)
+[![pnpm](https://img.shields.io/badge/pnpm-9.0-F69220?style=flat-square&logo=pnpm&logoColor=white)](https://pnpm.io/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](https://opensource.org/licenses/MIT)
+
+[Features](#-features) • [Quick Start](#-quick-start) • [Architecture](#-architecture) • [API Reference](#-api-reference)
+
+</div>
+
+---
+
+## Overview
+
+Wholesale AI is a real-time AI-powered negotiation assistant that helps real estate wholesalers analyze seller conversations, detect objections, track motivation levels, and receive strategic response suggestions—all in real-time.
 
 ## 🏗️ Project Structure
 
 ```
-wholesale-ai-negotiation-copilot/
+wholesale-ai/
 ├── apps/
-│   ├── web/          # Next.js 16 frontend (port 3000)
-│   └── server/       # Socket.io server (port 3001)
+│   ├── web/                 # Next.js 16 frontend (port 3000)
+│   │   └── src/
+│   │       ├── app/         # App Router pages
+│   │       ├── components/  # React components + shadcn/ui
+│   │       └── hooks/       # Custom hooks (Socket, Twilio, Mic)
+│   └── server/              # Socket.io server (port 3001)
+│       └── src/lib/         # AI analysis, Twilio, transcription
 ├── packages/
-│   ├── shared/       # Shared types and utilities
-│   ├── typescript-config/  # Shared TypeScript configs
-│   └── eslint-config/      # Shared ESLint configs
-└── ...
+│   ├── shared/              # Shared types and utilities
+│   └── typescript-config/   # Shared TypeScript configs
+└── scripts/                 # Dev tunnel and utilities
 ```
 
 ## ✨ Features
 
-✅ **Real-time Transcription** - Live speech-to-text with speaker identification
-✅ **AI Analysis Engine** - OpenAI-powered conversation analysis and strategic insights  
-✅ **Motivation Scoring** - Real-time motivation level tracking (1-10)
-✅ **Objection Detection** - Automatic identification and classification of seller objections
-✅ **Strategic Suggestions** - AI-generated response recommendations and next moves
-✅ **Demo Mode** - Simulated conversation for testing and training
-✅ **Text Simulation** - Manual text input for development and testing
+| Feature | Description |
+|---------|-------------|
+| **Real-time Transcription** | Live speech-to-text with Deepgram and speaker identification |
+| **AI Analysis Engine** | Claude-powered conversation analysis and strategic insights |
+| **Motivation Scoring** | Real-time seller motivation tracking (1-10 scale) |
+| **Objection Detection** | Automatic identification and classification of objections |
+| **Strategic Suggestions** | AI-generated response recommendations |
+| **Twilio Integration** | Make and receive real phone calls |
+| **Demo Mode** | Simulated conversations for testing and training |
 
 ## 🛠️ Tech Stack
 
-- **Frontend**: Next.js 16, React 19, Tailwind CSS, Socket.io Client
-- **Backend**: Node.js, Socket.io, TypeScript
-- **AI**: OpenAI GPT-4o-mini, Deepgram (optional)
-- **Build**: Turborepo, pnpm workspaces
-- **Deploy**: Railway
+| Layer | Technologies |
+|-------|-------------|
+| **Frontend** | Next.js 16, React 19, Tailwind CSS, shadcn/ui, Socket.io Client |
+| **Backend** | Node.js, Socket.io, TypeScript, Zod |
+| **AI/ML** | Anthropic Claude, Deepgram STT |
+| **Telephony** | Twilio Voice SDK |
+| **Build** | Turborepo, pnpm workspaces, Biome |
+| **Deploy** | Railway |
 
 ## 🚀 Quick Start
 
-1. **Install dependencies**
-   ```bash
-   pnpm install
-   ```
+### Prerequisites
 
-2. **Set up environment**
-   ```bash
-   cp .env.example .env.local
-   # Edit .env.local with your API keys
-   ```
+- Node.js 18+
+- pnpm 9+
 
-3. **Start development servers**
-   ```bash
-   # Start both apps in parallel
-   pnpm dev
-   
-   # Or start individually
-   pnpm dev:web     # Next.js app on :3000
-   pnpm dev:server  # Socket.io server on :3001
-   ```
-
-4. **Open your browser**
-   - Frontend: http://localhost:3000
-   - Call interface: http://localhost:3000/call
-   - Test page: http://localhost:3000/test
-
-### 4. Run Tests
+### Installation
 
 ```bash
-npm test           # Run all tests
-npm run test:watch # Watch mode
+# Clone the repository
+git clone https://github.com/ProductOfAmerica/wholesale-ai.git
+cd wholesale-ai
+
+# Install dependencies
+pnpm install
+
+# Set up environment variables
+cp .env.example .env.local
 ```
 
-## Usage Guide
+### Environment Variables
 
-### Text Simulation Mode
+```bash
+# Required
+ANTHROPIC_API_KEY=your-anthropic-key
+DEEPGRAM_API_KEY=your-deepgram-key
 
-1. Navigate to `/call` page
-2. Select speaker (Seller/You)
-3. Type message and click Send
-4. AI analysis appears automatically for seller messages
-5. Use "Run Demo" for full conversation simulation
+# Optional (for Twilio calls)
+TWILIO_ACCOUNT_SID=your-twilio-sid
+TWILIO_AUTH_TOKEN=your-twilio-token
 
-### Demo Conversation
+# Server
+FRONTEND_URL=http://localhost:3000
+```
 
-Click "Run Demo" to see a realistic wholesale negotiation conversation with:
-- Seller motivation progression (health issues, timeline pressure)
-- Pain points identification (property condition, financial needs)
-- Objection handling (price concerns)
-- Strategic response suggestions
+### Development
 
-### AI Analysis Features
+```bash
+# Start all apps (with Cloudflare tunnel for Twilio webhooks)
+pnpm dev
 
-- **Motivation Level**: 1-10 scale with color-coded gauge
-- **Pain Points**: Identified seller pressures and concerns  
-- **Objection Detection**: Automatic classification (price, timeline, trust, etc.)
-- **Suggested Response**: AI-generated responses under 200 characters
-- **Next Move**: Strategic recommendations for next steps
+# Or start individually
+pnpm dev:web     # Next.js on :3000
+pnpm dev:server  # Socket.io on :3001
+```
 
-## API Reference
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `pnpm dev` | Start all dev servers with tunnel |
+| `pnpm build` | Build all packages |
+| `pnpm test` | Run tests across all packages |
+| `pnpm typecheck` | Type check all packages |
+| `pnpm lint` | Lint with Biome |
+| `pnpm lint:fix` | Auto-fix lint issues |
+| `pnpm clean` | Clean all build outputs |
+
+## 🏛️ Architecture
+
+```mermaid
+flowchart TB
+    subgraph Client["🌐 Client Browser (Next.js :3000)"]
+        UI["📞 Call Interface<br/>PhoneDialer"]
+        Transcript["📝 Live Transcript"]
+        Suggestions["💡 AI Suggestions<br/>MotivationGauge"]
+        SocketClient["Socket.io Client"]
+        
+        UI --> SocketClient
+        Transcript --> SocketClient
+        Suggestions --> SocketClient
+    end
+    
+    subgraph Server["⚙️ Server (apps/server :3001)"]
+        SocketServer["Socket.io Server"]
+        
+        SocketServer --> Twilio["📱 Twilio Voice"]
+        SocketServer --> Claude["🤖 Anthropic Claude"]
+        SocketServer --> Deepgram["🎤 Deepgram STT"]
+    end
+    
+    SocketClient <-->|WebSocket| SocketServer
+```
+
+## 📡 API Reference
 
 ### Socket.io Events
 
-**Client → Server:**
-- `start_call` - Initialize new conversation
-- `simulate_speech` - Send text message `{ speaker, text }`
-- `run_demo` - Start demo conversation
+#### Client → Server
 
-**Server → Client:**
-- `transcript_update` - New message `{ speaker, text, timestamp }`
-- `ai_suggestion` - AI analysis `{ motivation_level, pain_points, objection_detected, suggested_response, recommended_next_move }`
+| Event | Payload | Description |
+|-------|---------|-------------|
+| `start_call` | `{ phoneNumber }` | Initialize new call |
+| `simulate_speech` | `{ speaker, text }` | Send simulated text |
+| `run_demo` | - | Start demo conversation |
+| `end_call` | - | End current call |
 
-## Architecture
+#### Server → Client
 
+| Event | Payload | Description |
+|-------|---------|-------------|
+| `transcript_update` | `{ speaker, text, timestamp }` | New transcript segment |
+| `ai_suggestion` | `{ motivation_level, pain_points, objection_detected, suggested_response, recommended_next_move }` | AI analysis result |
+| `call_status` | `{ status, callSid }` | Call state updates |
+
+### AI Response Schema
+
+```typescript
+interface AISuggestion {
+  motivation_level: number;      // 1-10 scale
+  pain_points: string[];         // Identified concerns
+  objection_detected: boolean;
+  objection_type?: string;       // price, timeline, trust, etc.
+  suggested_response: string;    // < 200 characters
+  recommended_next_move: string;
+}
 ```
-┌─────────────────┐    ┌──────────────┐    ┌─────────────┐
-│   Next.js App   │◄───┤  Socket.io   │◄───┤  Server.js  │
-│   (Call Page)   │    │   Client     │    │   Custom    │
-└─────────────────┘    └──────────────┘    └─────────────┘
-                                                   │
-                                           ┌───────▼──────┐
-                                           │ AI Analysis  │
-                                           │  (OpenAI)    │
-                                           └──────────────┘
+
+## 🧪 Testing
+
+```bash
+# Run all tests
+pnpm test
+
+# Run with watch mode
+pnpm test -- --watch
 ```
 
-## Testing
+- **Framework**: Vitest
+- **Approach**: TDD with mocked external APIs
+- **Coverage**: AI analysis, transcription, type validation
 
-- **Unit Tests**: 13 tests covering transcription, AI analysis, and components
-- **Mocking**: Complete mocking of external APIs (OpenAI, Deepgram)
-- **TDD Approach**: Tests written first, then implementation
-- **Coverage**: Core business logic and error handling
+## 🚢 Deployment
 
-## Deployment
-
-### Railway Deployment
+### Railway
 
 1. Connect GitHub repository to Railway
 2. Set environment variables in Railway dashboard
-3. Railway auto-detects Node.js and uses `npm start`
+3. Deploy automatically on push to `master`
 
-### Environment Variables for Production
-
-```bash
-OPENAI_API_KEY=your-production-openai-key
-DEEPGRAM_API_KEY=your-production-deepgram-key
-NODE_ENV=production
-FRONTEND_URL=https://your-app.railway.app
-```
-
-## Development Notes
-
-- **ES Modules**: Uses ES import/export syntax throughout
-- **Type Safety**: TypeScript interfaces for all data structures
-- **Error Handling**: Graceful fallbacks for API failures
-- **Performance**: Efficient state management and real-time updates
-- **Scalability**: Socket.io per-connection conversation history
-
-## Next Steps
-
-1. **Twilio Integration** - Live phone call transcription
-2. **Deepgram Integration** - Replace text simulation with real speech
-3. **CRM Integration** - Save conversations and analytics
-4. **Advanced AI** - Multi-turn conversation context and memory
-5. **Mobile App** - React Native companion app
-
-## License
+## 📝 License
 
 MIT License - Built for real estate wholesale professionals.
+
+---
+
+<div align="center">
+
+**[⬆ Back to Top](#wholesale-ai)**
+
+</div>
