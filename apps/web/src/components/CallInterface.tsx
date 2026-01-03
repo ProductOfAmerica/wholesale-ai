@@ -2,7 +2,7 @@
 
 import type { AISuggestion, CallSummary, TranscriptEntry } from '@wholesale-ai/shared';
 import { Device, Call } from '@twilio/voice-sdk';
-import { ClipboardCopyIcon, DownloadIcon } from 'lucide-react';
+import { ClipboardCopyIcon, DownloadIcon, Loader2 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AISuggestions } from '@/components/AISuggestions';
 import { AudioLevelBars } from '@/components/AudioVisualizer';
@@ -574,10 +574,13 @@ export function CallInterface() {
               </CardHeader>
               <CardContent className="space-y-4">
                 {summaryLoading ? (
-                  <div className="space-y-3">
-                    <Skeleton className="h-4 w-full" />
-                    <Skeleton className="h-4 w-3/4" />
-                    <Skeleton className="h-20 w-full" />
+                  <div className="flex flex-col items-center justify-center py-8 space-y-4">
+                    <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                    <p className="text-sm text-muted-foreground">Analyzing call...</p>
+                    <div className="space-y-2 w-full">
+                      <Skeleton className="h-4 w-full" />
+                      <Skeleton className="h-4 w-3/4" />
+                    </div>
                   </div>
                 ) : callSummary ? (
                   <>
