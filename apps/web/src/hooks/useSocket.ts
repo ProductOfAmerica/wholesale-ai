@@ -18,6 +18,9 @@ export function useSocket(): {
   useEffect(() => {
     const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL;
     const socketInstance = io(socketUrl, {
+      auth: {
+        apiKey: process.env.NEXT_PUBLIC_SOCKET_API_KEY,
+      },
       reconnection: true,
       reconnectionAttempts: 10,
       reconnectionDelay: 1000,

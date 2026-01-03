@@ -29,6 +29,7 @@ const env = validateEnv([
   'SERVER_URL',
   'DEEPGRAM_API_KEY',
   'ANTHROPIC_API_KEY',
+  'SOCKET_API_KEY',
 ] as const);
 
 const port = parseInt(env.PORT, 10);
@@ -509,12 +510,27 @@ const httpServer = createServer();
 
 const io = new Server(httpServer, {
   cors: {
-    origin: [frontendUrl, 'http://localhost:3000'],
+    origin:
+      process.env.NODE_ENV === 'production'
+        ? [frontendUrl]
+        : [frontendUrl, 'http://localhost:3000'],
     credentials: true,
   },
   transports: ['websocket', 'polling'],
   pingTimeout: 60000,
   pingInterval: 25000,
+  maxHttpBufferSize: 5e6,
+});
+
+io.use((socket, next) => {
+  const apiKey = socket.handshake.auth.apiKey;
+  if (!apiKey || apiKey !== env.SOCKET_API_KEY) {
+    console.warn(
+      `Unauthorized socket connection attempt from ${socket.handshake.address}`
+    );
+    return next(new Error('Unauthorized'));
+  }
+  next();
 });
 
 const twilioRouter = createTwilioRouter(io, serverUrl);
