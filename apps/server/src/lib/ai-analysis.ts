@@ -141,10 +141,22 @@ async function summarizeConversation(
     const response = await anthropic.messages.create({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 300,
+      system: `<role>You are a real estate negotiation analyst who creates concise conversation summaries.</role>
+
+<output_format>
+Write 2-3 sentences capturing:
+1. Key discussion points and property details
+2. Seller's motivation level and reasons
+3. Any objections or concerns raised
+</output_format>`,
       messages: [
         {
           role: 'user',
-          content: `Summarize this real estate negotiation conversation in 2-3 sentences, capturing key points, seller motivation, and any objections:\n\n${conversationText}`,
+          content: `<transcript>
+${conversationText}
+</transcript>
+
+Summarize this real estate negotiation conversation.`,
         },
       ],
     });
@@ -432,6 +444,14 @@ PRICE answered if seller gave any number.
 NEXT STEPS answered if you've already stated when you'll send the offer/call back AND seller acknowledged.
 Once confirmed, do NOT repeat the timeline. Just say "Talk soon." or "Bye."
 
+CONNECTED TIMELINES: When seller mentions a related issue (vacancy, family situation, deterioration), assume it shares the same timeline as previously stated unless they indicate otherwise. Do NOT re-ask "how long" for obviously connected facts.
+
+Example:
+- Seller says mold for "5 years"
+- Seller then says "dad went into a home, property's been vacant"
+- Do NOT ask "how long ago was that?" — it's clearly the same 5-year window
+- Instead: "Got it, so it's been sitting empty since then. What number works for you?"
+
 If you're about to ask something already covered, SKIP IT and ask about the next missing element instead.
 </answer_tracking>
 
@@ -500,6 +520,8 @@ RIGHT: "Got it. So if we close in 48 hours, does that work with your timeline?"
 - Re-asking anything in different words ("What's your timeline?" after they said "ASAP")
 - After "I'll have an offer by tomorrow" + seller says "Sounds great" → repeating "I'll get this over to you by end of day tomorrow"
 - Restating timeline after it's already been confirmed
+- Asking "how long ago was that?" after seller already established a timeline for related issues
+- Re-asking duration when two facts are obviously connected (vacancy + deterioration = same timeframe)
 </bad_examples>
 
 <good_examples>
@@ -516,6 +538,7 @@ RIGHT: "Got it. So if we close in 48 hours, does that work with your timeline?"
 - After getting timeline but no price: "Got it. What are you hoping to get for the property?"
 - After "I'll have an offer by tomorrow" + "Sounds great": "Talk soon."
 - After timeline confirmed: "Bye." (single word, done)
+- After "mold for 5 years" + "dad went into home, it's vacant": "Got it, so it's been sitting empty that whole time. What are you hoping to get for it?"
 </good_examples>`;
 
 export async function streamSuggestedResponse(
@@ -536,10 +559,15 @@ export async function streamSuggestedResponse(
     const stream = anthropic.messages.stream({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 200,
+      system: STREAMING_PROMPT,
       messages: [
         {
           role: 'user',
-          content: `${STREAMING_PROMPT}\n\n${conversationPrompt}`,
+          content: `${conversationPrompt}\n\nGenerate the exact words the wholesaler should say next.`,
+        },
+        {
+          role: 'assistant',
+          content: '',
         },
       ],
     });
@@ -579,10 +607,11 @@ export async function analyzeConversation(
     const response = await anthropic.messages.create({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 1000,
+      system: SYSTEM_PROMPT,
       messages: [
         {
           role: 'user',
-          content: `${SYSTEM_PROMPT}\n\nAnalyze this conversation and provide strategic insights using the provide_analysis tool:\n\n${conversationPrompt}`,
+          content: `${conversationPrompt}\n\nAnalyze this conversation and provide strategic insights using the provide_analysis tool.`,
         },
       ],
       tools: [analysisResultTool],
@@ -710,24 +739,64 @@ Pattern interrupt openers for next call:
 Be concise and actionable. Focus on what the caller can DO differently next time.
 </format>`;
 
-export async function generateCallSummary(
+export async function streamCallSummary(
   history: TranscriptEntry[],
-  duration: number
+  duration: number,
+  onToken: (token: string) => void
 ): Promise<CallSummary> {
-  try {
-    const anthropic = getClient();
+  const anthropic = getClient();
 
-    const conversationText = history
-      .map((entry) => `${entry.speaker}: ${entry.text}`)
-      .join('\n');
+  const conversationText = history
+    .map((entry) => `${entry.speaker}: ${entry.text}`)
+    .join('\n');
 
-    const response = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 1000,
+  const userContent = `Call Duration: ${Math.floor(duration / 60)}m ${duration % 60}s
+
+Transcript:
+${conversationText}`;
+
+  const streamingPromise = (async () => {
+    const stream = anthropic.messages.stream({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 500,
+      system: `${SUMMARY_PROMPT}
+
+Write a 2-3 sentence narrative summary of this call. Focus on what happened, how the seller responded, and the outcome. Do not use bullet points or structured format.`,
       messages: [
         {
           role: 'user',
-          content: `${SUMMARY_PROMPT}\n\nCall Duration: ${Math.floor(duration / 60)}m ${duration % 60}s\n\nTranscript:\n${conversationText}`,
+          content: `${userContent}
+
+Write a brief narrative summary of this call.`,
+        },
+      ],
+    });
+
+    let streamedSummary = '';
+    for await (const event of stream) {
+      if (
+        event.type === 'content_block_delta' &&
+        event.delta.type === 'text_delta'
+      ) {
+        const token = event.delta.text;
+        streamedSummary += token;
+        onToken(token);
+      }
+    }
+    return streamedSummary.trim();
+  })();
+
+  const structuredPromise = (async () => {
+    const response = await anthropic.messages.create({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 1000,
+      system: SUMMARY_PROMPT,
+      messages: [
+        {
+          role: 'user',
+          content: `${userContent}
+
+Analyze this completed call and provide structured data using the provide_summary tool.`,
         },
       ],
       tools: [summaryTool],
@@ -740,14 +809,29 @@ export async function generateCallSummary(
     );
 
     if (toolResult?.type === 'tool_use' && 'input' in toolResult) {
-      const validated = SummarySchema.parse(toolResult.input);
-      return {
-        duration,
-        ...validated,
-      };
-    } else {
-      throw new Error('No summary result found in response');
+      return SummarySchema.parse(toolResult.input);
     }
+    throw new Error('No summary result found in response');
+  })();
+
+  const [streamedSummary, structuredData] = await Promise.all([
+    streamingPromise,
+    structuredPromise,
+  ]);
+
+  return {
+    duration,
+    ...structuredData,
+    summary: streamedSummary,
+  };
+}
+
+export async function generateCallSummary(
+  history: TranscriptEntry[],
+  duration: number
+): Promise<CallSummary> {
+  try {
+    return await streamCallSummary(history, duration, () => {});
   } catch (error) {
     console.error('Call Summary Error:', error);
     return {
