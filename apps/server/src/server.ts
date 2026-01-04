@@ -1,5 +1,6 @@
 import type { IncomingMessage } from 'node:http';
 import { createServer } from 'node:http';
+import Anthropic from '@anthropic-ai/sdk';
 import type { AISuggestion, TranscriptEntry } from '@wholesale-ai/shared';
 import { validateEnv } from '@wholesale-ai/shared';
 import { config } from 'dotenv';
@@ -7,18 +8,22 @@ import { Server } from 'socket.io';
 import { WebSocket, WebSocketServer } from 'ws';
 
 import {
-  analyzeConversation,
-  clearConversationContext,
-  streamCallSummary,
-  streamSuggestedResponse,
-  updateConversationContext,
+  type AIService,
+  type ConversationContextManager,
+  createAIService,
+  createConversationContextManager,
 } from './lib/ai-analysis.js';
 import {
   createAudioBridge,
   removeAudioBridge,
   twilioToDeepgram,
 } from './lib/audio-bridge.js';
-import { endCall, initiateOutboundCall } from './lib/twilio-service.js';
+import {
+  type TwilioConfig,
+  type TwilioService,
+  createTwilioClient,
+  createTwilioService,
+} from './lib/twilio-service.js';
 import { createTwilioRouter } from './lib/twilio-webhooks.js';
 
 config({ path: '.env.local' });
@@ -30,11 +35,37 @@ const env = validateEnv([
   'DEEPGRAM_API_KEY',
   'ANTHROPIC_API_KEY',
   'SOCKET_API_KEY',
+  'TWILIO_ACCOUNT_SID',
+  'TWILIO_AUTH_TOKEN',
+  'TWILIO_PHONE_NUMBER',
 ] as const);
+
+const twilioConfig: TwilioConfig = {
+  accountSid: env.TWILIO_ACCOUNT_SID,
+  authToken: env.TWILIO_AUTH_TOKEN,
+  phoneNumber: env.TWILIO_PHONE_NUMBER,
+  apiKeySid: process.env.TWILIO_API_KEY_SID,
+  apiKeySecret: process.env.TWILIO_API_KEY_SECRET,
+  twimlAppSid: process.env.TWILIO_TWIML_APP_SID,
+};
 
 const port = parseInt(env.PORT, 10);
 const frontendUrl = env.FRONTEND_URL.replace(/\/$/, '');
-const serverUrl = `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`;
+const serverUrl = `https://${env.RAILWAY_PUBLIC_DOMAIN}`;
+const deepgramApiKey = env.DEEPGRAM_API_KEY;
+
+console.log('Initializing Anthropic client...');
+const anthropicClient = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
+const aiService: AIService = createAIService(anthropicClient);
+const contextManager: ConversationContextManager =
+  createConversationContextManager(aiService);
+
+console.log('Initializing Twilio client...');
+const twilioClient = createTwilioClient(twilioConfig);
+const twilioService: TwilioService = createTwilioService(
+  twilioClient,
+  twilioConfig
+);
 
 const conversationHistory = new Map<string, TranscriptEntry[]>();
 const deepgramConnections = new Map<string, WebSocket>();
@@ -116,18 +147,20 @@ async function runAIAnalysis(
 
     socket.emit('ai_suggestion_start');
 
-    const fullResponse = await streamSuggestedResponse(
+    const context = contextManager.get(socketId);
+    const fullResponse = await aiService.streamSuggestedResponse(
       history,
       transcript,
       (token) => {
         socket.emit('ai_suggestion_token', token);
       },
-      socketId
+      context
     );
 
     socket.emit('ai_suggestion_end', { suggested_response: fullResponse });
 
-    analyzeConversation(history, transcript)
+    aiService
+      .analyzeConversation(history, transcript)
       .then((analysisResult) => {
         socket.emit('ai_suggestion', {
           ...analysisResult,
@@ -136,7 +169,7 @@ async function runAIAnalysis(
       })
       .catch(console.error);
 
-    updateConversationContext(socketId, history).catch(console.error);
+    contextManager.updateContext(socketId, history).catch(console.error);
   } catch (error) {
     console.error('AI Analysis failed:', error);
 
@@ -176,8 +209,6 @@ function handleDeepgramMessage(
 ): void {
   const message = parseDeepgramMessage(data);
   if (!message) return;
-
-  // console.log(`Deepgram message for ${socketId} (${speaker}):`, message.type, message);
 
   const socket = io.sockets.sockets.get(socketId);
   socket?.emit('deepgram_message', message);
@@ -388,8 +419,7 @@ function createDeepgramConnection(
   config: DeepgramConfig,
   track: 'inbound' | 'outbound' = 'inbound'
 ): void {
-  const apiKey = process.env.DEEPGRAM_API_KEY;
-  if (!apiKey) {
+  if (!deepgramApiKey) {
     socket.emit('deepgram_error', { error: 'Deepgram API key not configured' });
     return;
   }
@@ -410,7 +440,7 @@ function createDeepgramConnection(
   const wsUrl = `wss://api.deepgram.com/v2/listen?model=${config.model}&encoding=${config.encoding}&sample_rate=${config.sampleRate}&eot_threshold=0.7&eot_timeout_ms=5000`;
 
   const deepgramWS = new WebSocket(wsUrl, {
-    headers: { Authorization: `token ${apiKey}` },
+    headers: { Authorization: `token ${deepgramApiKey}` },
   });
 
   const ctx: DeepgramConnectionContext = {
@@ -533,7 +563,12 @@ io.use((socket, next) => {
   next();
 });
 
-const twilioRouter = createTwilioRouter(io, serverUrl);
+const twilioRouter = createTwilioRouter({
+  io,
+  serverUrl,
+  twilioService,
+  aiService,
+});
 
 const wss = new WebSocketServer({ noServer: true });
 
@@ -797,7 +832,7 @@ async function handleTwilioCallStart(
     const streamUrl = `${wsProtocol}://${wsHost}/twilio/stream`;
     const statusCallbackUrl = `${serverUrl}/twilio/status`;
 
-    const result = await initiateOutboundCall({
+    const result = await twilioService.initiateOutboundCall({
       to: data.phoneNumber,
       streamUrl,
       statusCallbackUrl,
@@ -844,7 +879,7 @@ async function handleTwilioCallEnd(
   console.log(`Ending Twilio call: ${data.callSid}`);
 
   try {
-    await endCall(data.callSid);
+    await twilioService.endCall(data.callSid);
     activeCallSids.delete(socket.id);
     closeDeepgramConnection(socket.id);
 
@@ -889,7 +924,7 @@ async function handleRequestCallSummary(
   }
 
   try {
-    const summary = await streamCallSummary(history, data.duration, {
+    const summary = await aiService.streamCallSummary(history, data.duration, {
       onSummaryStart: () => socket.emit('call_summary_start'),
       onSummaryToken: (token) => socket.emit('call_summary_token', token),
       onSummaryEnd: () => socket.emit('call_summary_end'),
@@ -915,11 +950,11 @@ function handleDisconnect(socket: SocketType, reason: string): void {
 
   const callSid = activeCallSids.get(socket.id);
   if (callSid) {
-    endCall(callSid).catch(console.error);
+    twilioService.endCall(callSid).catch(console.error);
     activeCallSids.delete(socket.id);
   }
 
-  clearConversationContext(socket.id);
+  contextManager.clear(socket.id);
   closeDeepgramConnection(socket.id);
   conversationHistory.delete(socket.id);
 }

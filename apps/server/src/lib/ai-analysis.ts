@@ -1,4 +1,4 @@
-import Anthropic from '@anthropic-ai/sdk';
+import type Anthropic from '@anthropic-ai/sdk';
 import type {
   AISuggestion,
   CallSummary,
@@ -6,7 +6,6 @@ import type {
 } from '@wholesale-ai/shared';
 import { z } from 'zod';
 
-// Zod schema for structured response
 const AnalysisSchema = z.object({
   motivation_level: z.number().min(1).max(10),
   pain_points: z.array(z.string()),
@@ -16,7 +15,6 @@ const AnalysisSchema = z.object({
   recommended_next_move: z.string(),
 });
 
-// Tool schema for Anthropic
 const analysisResultTool = {
   name: 'provide_analysis',
   description: 'Provide structured analysis of the negotiation conversation',
@@ -46,48 +44,54 @@ const analysisResultTool = {
   },
 };
 
-let client: Anthropic | null = null;
-
-function getClient(): Anthropic {
-  if (!client) {
-    const apiKey = process.env.ANTHROPIC_API_KEY;
-
-    if (!apiKey) {
-      throw new Error('ANTHROPIC_API_KEY environment variable is not set');
-    }
-
-    console.log(
-      'Initializing Anthropic client with API key:',
-      `${apiKey.substring(0, 20)}...`
-    );
-
-    client = new Anthropic({
-      apiKey,
-    });
-  }
-  return client;
-}
-
-interface ConversationContext {
+export interface ConversationContext {
   summary?: string;
   recentHistory: TranscriptEntry[];
 }
 
-const conversationContexts = new Map<string, ConversationContext>();
-
-export function getConversationContext(socketId: string): ConversationContext {
-  return conversationContexts.get(socketId) || { recentHistory: [] };
+export interface StreamCallSummaryCallbacks {
+  onSummaryStart: () => void;
+  onSummaryToken: (token: string) => void;
+  onSummaryEnd: () => void;
+  onStructuredData: (data: {
+    final_motivation_level: number;
+    pain_points: string[];
+    objections: string[];
+    next_steps: string;
+  }) => void;
 }
 
-export function setConversationContext(
-  socketId: string,
-  context: ConversationContext
-): void {
-  conversationContexts.set(socketId, context);
+export interface AIService {
+  streamSuggestedResponse: (
+    history: TranscriptEntry[],
+    latestStatement: string,
+    onToken: (token: string) => void,
+    context?: ConversationContext
+  ) => Promise<string>;
+  analyzeConversation: (
+    history: TranscriptEntry[],
+    latestStatement: string
+  ) => Promise<AISuggestion>;
+  summarizeConversation: (history: TranscriptEntry[]) => Promise<string>;
+  streamCallSummary: (
+    history: TranscriptEntry[],
+    duration: number,
+    callbacks: StreamCallSummaryCallbacks
+  ) => Promise<CallSummary>;
+  generateCallSummary: (
+    history: TranscriptEntry[],
+    duration: number
+  ) => Promise<CallSummary>;
 }
 
-export function clearConversationContext(socketId: string): void {
-  conversationContexts.delete(socketId);
+export interface ConversationContextManager {
+  get: (socketId: string) => ConversationContext;
+  set: (socketId: string, context: ConversationContext) => void;
+  clear: (socketId: string) => void;
+  updateContext: (
+    socketId: string,
+    fullHistory: TranscriptEntry[]
+  ) => Promise<void>;
 }
 
 const RECENT_TURNS_LIMIT = 6;
@@ -127,67 +131,6 @@ ${conversationText}
 <latest_statement>
 ${latestStatement}
 </latest_statement>`;
-}
-
-async function summarizeConversation(
-  history: TranscriptEntry[]
-): Promise<string> {
-  try {
-    const anthropic = getClient();
-    const conversationText = history
-      .map((entry) => `${entry.speaker}: ${entry.text}`)
-      .join('\n');
-
-    const response = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 300,
-      system: `<role>You are a real estate negotiation analyst who creates concise conversation summaries.</role>
-
-<output_format>
-Write 2-3 sentences capturing:
-1. Key discussion points and property details
-2. Seller's motivation level and reasons
-3. Any objections or concerns raised
-</output_format>`,
-      messages: [
-        {
-          role: 'user',
-          content: `<transcript>
-${conversationText}
-</transcript>
-
-Summarize this real estate negotiation conversation.`,
-        },
-      ],
-    });
-
-    const textBlock = response.content.find((c) => c.type === 'text');
-    return textBlock?.type === 'text' ? textBlock.text : '';
-  } catch (error) {
-    console.error('Failed to summarize conversation:', error);
-    return '';
-  }
-}
-
-export async function updateConversationContext(
-  socketId: string,
-  fullHistory: TranscriptEntry[]
-): Promise<void> {
-  if (fullHistory.length < SUMMARIZE_THRESHOLD) return;
-
-  const context = getConversationContext(socketId);
-  const historyToSummarize = fullHistory.slice(0, -RECENT_TURNS_LIMIT);
-
-  if (historyToSummarize.length > (context.recentHistory?.length || 0)) {
-    const summary = await summarizeConversation(historyToSummarize);
-    if (summary) {
-      setConversationContext(socketId, {
-        summary,
-        recentHistory: fullHistory.slice(-RECENT_TURNS_LIMIT),
-      });
-      console.log(`Updated conversation context for ${socketId}`);
-    }
-  }
 }
 
 const SYSTEM_PROMPT = `<role>
@@ -541,116 +484,6 @@ RIGHT: "Got it. So if we close in 48 hours, does that work with your timeline?"
 - After "mold for 5 years" + "dad went into home, it's vacant": "Got it, so it's been sitting empty that whole time. What are you hoping to get for it?"
 </good_examples>`;
 
-export async function streamSuggestedResponse(
-  history: TranscriptEntry[],
-  latestStatement: string,
-  onToken: (token: string) => void,
-  socketId?: string
-): Promise<string> {
-  try {
-    const anthropic = getClient();
-    const context = socketId ? getConversationContext(socketId) : undefined;
-    const conversationPrompt = formatConversationForPrompt(
-      history,
-      latestStatement,
-      context
-    );
-
-    const stream = anthropic.messages.stream({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 200,
-      system: STREAMING_PROMPT,
-      messages: [
-        {
-          role: 'user',
-          content: `${conversationPrompt}\n\nGenerate the exact words the wholesaler should say next.`,
-        },
-        {
-          role: 'assistant',
-          content: '',
-        },
-      ],
-    });
-
-    let fullResponse = '';
-
-    for await (const event of stream) {
-      if (
-        event.type === 'content_block_delta' &&
-        event.delta.type === 'text_delta'
-      ) {
-        const token = event.delta.text;
-        fullResponse += token;
-        onToken(token);
-      }
-    }
-
-    return fullResponse.trim();
-  } catch (error) {
-    console.error('Streaming error:', error);
-    throw error;
-  }
-}
-
-export async function analyzeConversation(
-  history: TranscriptEntry[],
-  latestStatement: string
-): Promise<AISuggestion> {
-  try {
-    const anthropic = getClient();
-
-    const conversationPrompt = formatConversationForPrompt(
-      history,
-      latestStatement
-    );
-
-    const response = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 1000,
-      system: SYSTEM_PROMPT,
-      messages: [
-        {
-          role: 'user',
-          content: `${conversationPrompt}\n\nAnalyze this conversation and provide strategic insights using the provide_analysis tool.`,
-        },
-      ],
-      tools: [analysisResultTool],
-      tool_choice: { type: 'tool', name: 'provide_analysis' },
-    });
-
-    const toolResult = response.content.find(
-      (content) =>
-        content.type === 'tool_use' && content.name === 'provide_analysis'
-    );
-
-    if (toolResult?.type === 'tool_use' && 'input' in toolResult) {
-      const input = toolResult.input as Record<string, unknown>;
-      if (
-        typeof input.suggested_response === 'string' &&
-        input.suggested_response.length > 200
-      ) {
-        input.suggested_response = `${input.suggested_response.substring(0, 197)}...`;
-      }
-
-      return AnalysisSchema.parse(input);
-    } else {
-      throw new Error('No analysis result found in response');
-    }
-  } catch (error) {
-    console.error('AI Analysis Error:', error);
-
-    return {
-      motivation_level: 5,
-      pain_points: [],
-      objection_detected: false,
-      objection_type: null,
-      suggested_response: 'Continue the conversation naturally.',
-      recommended_next_move: 'Keep building rapport',
-      error: error instanceof Error ? error.message : 'Unknown error occurred',
-    };
-  }
-}
-
 const SummarySchema = z.object({
   final_motivation_level: z.number().min(1).max(10),
   pain_points: z.array(z.string()),
@@ -739,135 +572,317 @@ Pattern interrupt openers for next call:
 Be concise and actionable. Focus on what the caller can DO differently next time.
 </format>`;
 
-interface StreamCallSummaryCallbacks {
-  onSummaryStart: () => void;
-  onSummaryToken: (token: string) => void;
-  onSummaryEnd: () => void;
-  onStructuredData: (data: {
-    final_motivation_level: number;
-    pain_points: string[];
-    objections: string[];
-    next_steps: string;
-  }) => void;
+export function createConversationContextManager(
+  aiService: AIService
+): ConversationContextManager {
+  const contexts = new Map<string, ConversationContext>();
+
+  return {
+    get(socketId: string): ConversationContext {
+      return contexts.get(socketId) || { recentHistory: [] };
+    },
+
+    set(socketId: string, context: ConversationContext): void {
+      contexts.set(socketId, context);
+    },
+
+    clear(socketId: string): void {
+      contexts.delete(socketId);
+    },
+
+    async updateContext(
+      socketId: string,
+      fullHistory: TranscriptEntry[]
+    ): Promise<void> {
+      if (fullHistory.length < SUMMARIZE_THRESHOLD) return;
+
+      const context = this.get(socketId);
+      const historyToSummarize = fullHistory.slice(0, -RECENT_TURNS_LIMIT);
+
+      if (historyToSummarize.length > (context.recentHistory?.length || 0)) {
+        const summary = await aiService.summarizeConversation(historyToSummarize);
+        if (summary) {
+          this.set(socketId, {
+            summary,
+            recentHistory: fullHistory.slice(-RECENT_TURNS_LIMIT),
+          });
+          console.log(`Updated conversation context for ${socketId}`);
+        }
+      }
+    },
+  };
 }
 
-export async function streamCallSummary(
-  history: TranscriptEntry[],
-  duration: number,
-  callbacks: StreamCallSummaryCallbacks
-): Promise<CallSummary> {
-  const anthropic = getClient();
+export function createAIService(client: Anthropic): AIService {
+  async function summarizeConversation(
+    history: TranscriptEntry[]
+  ): Promise<string> {
+    try {
+      const conversationText = history
+        .map((entry) => `${entry.speaker}: ${entry.text}`)
+        .join('\n');
 
-  const conversationText = history
-    .map((entry) => `${entry.speaker}: ${entry.text}`)
-    .join('\n');
+      const response = await client.messages.create({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 300,
+        system: `<role>You are a real estate negotiation analyst who creates concise conversation summaries.</role>
 
-  const userContent = `Call Duration: ${Math.floor(duration / 60)}m ${duration % 60}s
+<output_format>
+Write 2-3 sentences capturing:
+1. Key discussion points and property details
+2. Seller's motivation level and reasons
+3. Any objections or concerns raised
+</output_format>`,
+        messages: [
+          {
+            role: 'user',
+            content: `<transcript>
+${conversationText}
+</transcript>
+
+Summarize this real estate negotiation conversation.`,
+          },
+        ],
+      });
+
+      const textBlock = response.content.find((c) => c.type === 'text');
+      return textBlock?.type === 'text' ? textBlock.text : '';
+    } catch (error) {
+      console.error('Failed to summarize conversation:', error);
+      return '';
+    }
+  }
+
+  async function streamSuggestedResponse(
+    history: TranscriptEntry[],
+    latestStatement: string,
+    onToken: (token: string) => void,
+    context?: ConversationContext
+  ): Promise<string> {
+    try {
+      const conversationPrompt = formatConversationForPrompt(
+        history,
+        latestStatement,
+        context
+      );
+
+      const stream = client.messages.stream({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 200,
+        system: STREAMING_PROMPT,
+        messages: [
+          {
+            role: 'user',
+            content: `${conversationPrompt}\n\nGenerate the exact words the wholesaler should say next.`,
+          },
+          {
+            role: 'assistant',
+            content: '',
+          },
+        ],
+      });
+
+      let fullResponse = '';
+
+      for await (const event of stream) {
+        if (
+          event.type === 'content_block_delta' &&
+          event.delta.type === 'text_delta'
+        ) {
+          const token = event.delta.text;
+          fullResponse += token;
+          onToken(token);
+        }
+      }
+
+      return fullResponse.trim();
+    } catch (error) {
+      console.error('Streaming error:', error);
+      throw error;
+    }
+  }
+
+  async function analyzeConversation(
+    history: TranscriptEntry[],
+    latestStatement: string
+  ): Promise<AISuggestion> {
+    try {
+      const conversationPrompt = formatConversationForPrompt(
+        history,
+        latestStatement
+      );
+
+      const response = await client.messages.create({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 1000,
+        system: SYSTEM_PROMPT,
+        messages: [
+          {
+            role: 'user',
+            content: `${conversationPrompt}\n\nAnalyze this conversation and provide strategic insights using the provide_analysis tool.`,
+          },
+        ],
+        tools: [analysisResultTool],
+        tool_choice: { type: 'tool', name: 'provide_analysis' },
+      });
+
+      const toolResult = response.content.find(
+        (content) =>
+          content.type === 'tool_use' && content.name === 'provide_analysis'
+      );
+
+      if (toolResult?.type === 'tool_use' && 'input' in toolResult) {
+        const input = toolResult.input as Record<string, unknown>;
+        if (
+          typeof input.suggested_response === 'string' &&
+          input.suggested_response.length > 200
+        ) {
+          input.suggested_response = `${input.suggested_response.substring(0, 197)}...`;
+        }
+
+        return AnalysisSchema.parse(input);
+      } else {
+        throw new Error('No analysis result found in response');
+      }
+    } catch (error) {
+      console.error('AI Analysis Error:', error);
+
+      return {
+        motivation_level: 5,
+        pain_points: [],
+        objection_detected: false,
+        objection_type: null,
+        suggested_response: 'Continue the conversation naturally.',
+        recommended_next_move: 'Keep building rapport',
+        error: error instanceof Error ? error.message : 'Unknown error occurred',
+      };
+    }
+  }
+
+  async function streamCallSummary(
+    history: TranscriptEntry[],
+    duration: number,
+    callbacks: StreamCallSummaryCallbacks
+  ): Promise<CallSummary> {
+    const conversationText = history
+      .map((entry) => `${entry.speaker}: ${entry.text}`)
+      .join('\n');
+
+    const userContent = `Call Duration: ${Math.floor(duration / 60)}m ${duration % 60}s
 
 Transcript:
 ${conversationText}`;
 
-  const streamingPromise = (async () => {
-    const stream = anthropic.messages.stream({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 500,
-      system: `${SUMMARY_PROMPT}
+    const streamingPromise = (async () => {
+      const stream = client.messages.stream({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 500,
+        system: `${SUMMARY_PROMPT}
 
 Write a 2-3 sentence narrative summary of this call. Focus on what happened, how the seller responded, and the outcome. Do not use bullet points or structured format.`,
-      messages: [
-        {
-          role: 'user',
-          content: `${userContent}
+        messages: [
+          {
+            role: 'user',
+            content: `${userContent}
 
 Write a brief narrative summary of this call.`,
-        },
-      ],
-    });
+          },
+        ],
+      });
 
-    callbacks.onSummaryStart();
-    let streamedSummary = '';
-    for await (const event of stream) {
-      if (
-        event.type === 'content_block_delta' &&
-        event.delta.type === 'text_delta'
-      ) {
-        const token = event.delta.text;
-        streamedSummary += token;
-        callbacks.onSummaryToken(token);
+      callbacks.onSummaryStart();
+      let streamedSummary = '';
+      for await (const event of stream) {
+        if (
+          event.type === 'content_block_delta' &&
+          event.delta.type === 'text_delta'
+        ) {
+          const token = event.delta.text;
+          streamedSummary += token;
+          callbacks.onSummaryToken(token);
+        }
       }
-    }
-    callbacks.onSummaryEnd();
-    return streamedSummary.trim();
-  })();
+      callbacks.onSummaryEnd();
+      return streamedSummary.trim();
+    })();
 
-  const structuredPromise = (async () => {
-    const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 1000,
-      system: SUMMARY_PROMPT,
-      messages: [
-        {
-          role: 'user',
-          content: `${userContent}
+    const structuredPromise = (async () => {
+      const response = await client.messages.create({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 1000,
+        system: SUMMARY_PROMPT,
+        messages: [
+          {
+            role: 'user',
+            content: `${userContent}
 
 Analyze this completed call and provide structured data using the provide_summary tool.`,
-        },
-      ],
-      tools: [summaryTool],
-      tool_choice: { type: 'tool', name: 'provide_summary' },
-    });
-
-    const toolResult = response.content.find(
-      (content) =>
-        content.type === 'tool_use' && content.name === 'provide_summary'
-    );
-
-    if (toolResult?.type === 'tool_use' && 'input' in toolResult) {
-      const data = SummarySchema.parse(toolResult.input);
-      callbacks.onStructuredData({
-        final_motivation_level: data.final_motivation_level,
-        pain_points: data.pain_points,
-        objections: data.objections,
-        next_steps: data.next_steps,
+          },
+        ],
+        tools: [summaryTool],
+        tool_choice: { type: 'tool', name: 'provide_summary' },
       });
-      return data;
-    }
-    throw new Error('No summary result found in response');
-  })();
 
-  const [streamedSummary, structuredData] = await Promise.all([
-    streamingPromise,
-    structuredPromise,
-  ]);
+      const toolResult = response.content.find(
+        (content) =>
+          content.type === 'tool_use' && content.name === 'provide_summary'
+      );
 
-  return {
-    duration,
-    ...structuredData,
-    summary: streamedSummary,
-  };
-}
+      if (toolResult?.type === 'tool_use' && 'input' in toolResult) {
+        const data = SummarySchema.parse(toolResult.input);
+        callbacks.onStructuredData({
+          final_motivation_level: data.final_motivation_level,
+          pain_points: data.pain_points,
+          objections: data.objections,
+          next_steps: data.next_steps,
+        });
+        return data;
+      }
+      throw new Error('No summary result found in response');
+    })();
 
-export async function generateCallSummary(
-  history: TranscriptEntry[],
-  duration: number
-): Promise<CallSummary> {
-  try {
-    return await streamCallSummary(history, duration, {
-      onSummaryStart: () => {},
-      onSummaryToken: () => {},
-      onSummaryEnd: () => {},
-      onStructuredData: () => {},
-    });
-  } catch (error) {
-    console.error('Call Summary Error:', error);
+    const [streamedSummary, structuredData] = await Promise.all([
+      streamingPromise,
+      structuredPromise,
+    ]);
+
     return {
       duration,
-      final_motivation_level: 5,
-      pain_points: [],
-      objections: [],
-      summary: 'Unable to generate summary.',
-      next_steps: 'Follow up with the seller.',
-      error: error instanceof Error ? error.message : 'Unknown error',
+      ...structuredData,
+      summary: streamedSummary,
     };
   }
+
+  async function generateCallSummary(
+    history: TranscriptEntry[],
+    duration: number
+  ): Promise<CallSummary> {
+    try {
+      return await streamCallSummary(history, duration, {
+        onSummaryStart: () => {},
+        onSummaryToken: () => {},
+        onSummaryEnd: () => {},
+        onStructuredData: () => {},
+      });
+    } catch (error) {
+      console.error('Call Summary Error:', error);
+      return {
+        duration,
+        final_motivation_level: 5,
+        pain_points: [],
+        objections: [],
+        summary: 'Unable to generate summary.',
+        next_steps: 'Follow up with the seller.',
+        error: error instanceof Error ? error.message : 'Unknown error',
+      };
+    }
+  }
+
+  return {
+    streamSuggestedResponse,
+    analyzeConversation,
+    summarizeConversation,
+    streamCallSummary,
+    generateCallSummary,
+  };
 }

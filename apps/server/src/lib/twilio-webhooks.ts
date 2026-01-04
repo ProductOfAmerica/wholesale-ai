@@ -1,13 +1,8 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { parse as parseUrl } from 'node:url';
 import type { Server as SocketIOServer } from 'socket.io';
-import { streamCallSummary } from './ai-analysis.js';
-import {
-  endCall,
-  generateAccessToken,
-  generateClientTwiML,
-  generateStreamTwiML,
-} from './twilio-service.js';
+import type { AIService, StreamCallSummaryCallbacks } from './ai-analysis.js';
+import type { TwilioService } from './twilio-service.js';
 
 function parseFormBody(body: string): Record<string, string> {
   const params: Record<string, string> = {};
@@ -32,10 +27,11 @@ async function getRequestBody(req: IncomingMessage): Promise<string> {
   });
 }
 
-export function handleVoiceWebhook(
+function handleVoiceWebhook(
   _req: IncomingMessage,
   res: ServerResponse,
-  query: Record<string, string | string[] | undefined>
+  query: Record<string, string | string[] | undefined>,
+  twilioService: TwilioService
 ): void {
   console.log('Twilio voice webhook hit!', query);
   const streamUrl = query.streamUrl as string;
@@ -48,14 +44,14 @@ export function handleVoiceWebhook(
   }
 
   console.log('Stream URL received:', streamUrl);
-  const twiml = generateStreamTwiML(streamUrl);
+  const twiml = twilioService.generateStreamTwiML(streamUrl);
   console.log('Returning TwiML:', twiml);
 
   res.writeHead(200, { 'Content-Type': 'application/xml' });
   res.end(twiml);
 }
 
-export async function handleStatusCallback(
+async function handleStatusCallback(
   req: IncomingMessage,
   res: ServerResponse,
   io: SocketIOServer
@@ -63,16 +59,6 @@ export async function handleStatusCallback(
   try {
     const body = await getRequestBody(req);
     const params = parseFormBody(body);
-
-    // Skip signature validation when using tunnels (Cloudflare/ngrok modify requests)
-    // In production with direct Twilio access, re-enable this
-    // const signature = req.headers['x-twilio-signature'] as string;
-    // const protocol = req.headers['x-forwarded-proto'] || 'http';
-    // const host = req.headers.host || 'localhost';
-    // const fullUrl = `${protocol}://${host}${req.url}`;
-    // if (signature && !validateTwilioRequest(signature, fullUrl, params)) {
-    //   console.warn('Invalid Twilio signature');
-    // }
 
     const callSid = params.CallSid;
     const callStatus = params.CallStatus;
@@ -100,13 +86,14 @@ export async function handleStatusCallback(
   }
 }
 
-export function handleTokenRequest(
+function handleTokenRequest(
   _req: IncomingMessage,
-  res: ServerResponse
+  res: ServerResponse,
+  twilioService: TwilioService
 ): void {
   try {
     const identity = `user-${Date.now()}`;
-    const token = generateAccessToken(identity);
+    const token = twilioService.generateAccessToken(identity);
 
     res.writeHead(200, {
       'Content-Type': 'application/json',
@@ -120,10 +107,11 @@ export function handleTokenRequest(
   }
 }
 
-export async function handleVoiceClientWebhook(
+async function handleVoiceClientWebhook(
   req: IncomingMessage,
   res: ServerResponse,
-  serverUrl: string
+  serverUrl: string,
+  twilioService: TwilioService
 ): Promise<void> {
   try {
     const body = await getRequestBody(req);
@@ -142,7 +130,7 @@ export async function handleVoiceClientWebhook(
     const wsHost = serverUrl.replace(/^https?:\/\//, '');
     const streamUrl = `${wsProtocol}://${wsHost}/twilio/stream`;
 
-    const twiml = generateClientTwiML(to, streamUrl);
+    const twiml = twilioService.generateClientTwiML(to, streamUrl);
     console.log('Returning TwiML for client call:', twiml);
 
     res.writeHead(200, { 'Content-Type': 'application/xml' });
@@ -156,7 +144,8 @@ export async function handleVoiceClientWebhook(
 
 async function handleSummaryRequest(
   req: IncomingMessage,
-  res: ServerResponse
+  res: ServerResponse,
+  aiService: AIService
 ): Promise<void> {
   if (req.method === 'OPTIONS') {
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -188,7 +177,7 @@ async function handleSummaryRequest(
       'Access-Control-Allow-Origin': '*',
     });
 
-    const summary = await streamCallSummary(transcript, duration || 0, {
+    const callbacks: StreamCallSummaryCallbacks = {
       onSummaryStart: () => {
         res.write('event: summary_start\ndata: {}\n\n');
       },
@@ -201,7 +190,13 @@ async function handleSummaryRequest(
       onStructuredData: (data) => {
         res.write(`event: structured_data\ndata: ${JSON.stringify(data)}\n\n`);
       },
-    });
+    };
+
+    const summary = await aiService.streamCallSummary(
+      transcript,
+      duration || 0,
+      callbacks
+    );
 
     res.write(`event: done\ndata: ${JSON.stringify(summary)}\n\n`);
     res.end();
@@ -228,7 +223,8 @@ async function handleSummaryRequest(
 
 async function handleEndCallRequest(
   req: IncomingMessage,
-  res: ServerResponse
+  res: ServerResponse,
+  twilioService: TwilioService
 ): Promise<void> {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -251,7 +247,7 @@ async function handleEndCallRequest(
     }
 
     console.log(`Ending orphaned call via REST: ${callSid}`);
-    await endCall(callSid);
+    await twilioService.endCall(callSid);
 
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ success: true }));
@@ -270,6 +266,8 @@ interface RouteContext {
   io: SocketIOServer;
   serverUrl: string;
   query: Record<string, string | string[] | undefined>;
+  twilioService: TwilioService;
+  aiService: AIService;
 }
 
 type RouteHandler = (
@@ -288,18 +286,19 @@ const routes: Route[] = [
   {
     path: '/twilio/token',
     methods: ['GET'],
-    handler: (req, res) => handleTokenRequest(req, res),
+    handler: (req, res, ctx) => handleTokenRequest(req, res, ctx.twilioService),
   },
   {
     path: '/twilio/voice',
     methods: ['POST'],
-    handler: (req, res, ctx) => handleVoiceWebhook(req, res, ctx.query),
+    handler: (req, res, ctx) =>
+      handleVoiceWebhook(req, res, ctx.query, ctx.twilioService),
   },
   {
     path: '/twilio/voice-client',
     methods: ['POST'],
     handler: (req, res, ctx) =>
-      handleVoiceClientWebhook(req, res, ctx.serverUrl),
+      handleVoiceClientWebhook(req, res, ctx.serverUrl, ctx.twilioService),
   },
   {
     path: '/twilio/status',
@@ -309,16 +308,26 @@ const routes: Route[] = [
   {
     path: '/twilio/summary',
     methods: ['POST', 'OPTIONS'],
-    handler: (req, res) => handleSummaryRequest(req, res),
+    handler: (req, res, ctx) => handleSummaryRequest(req, res, ctx.aiService),
   },
   {
     path: '/twilio/end-call',
     methods: ['POST', 'OPTIONS'],
-    handler: (req, res) => handleEndCallRequest(req, res),
+    handler: (req, res, ctx) =>
+      handleEndCallRequest(req, res, ctx.twilioService),
   },
 ];
 
-export function createTwilioRouter(io: SocketIOServer, serverUrl: string) {
+export interface TwilioRouterDeps {
+  io: SocketIOServer;
+  serverUrl: string;
+  twilioService: TwilioService;
+  aiService: AIService;
+}
+
+export function createTwilioRouter(deps: TwilioRouterDeps) {
+  const { io, serverUrl, twilioService, aiService } = deps;
+
   return async (
     req: IncomingMessage,
     res: ServerResponse
@@ -338,7 +347,13 @@ export function createTwilioRouter(io: SocketIOServer, serverUrl: string) {
       return false;
     }
 
-    await route.handler(req, res, { io, serverUrl, query: parsed.query });
+    await route.handler(req, res, {
+      io,
+      serverUrl,
+      query: parsed.query,
+      twilioService,
+      aiService,
+    });
     return true;
   };
 }
