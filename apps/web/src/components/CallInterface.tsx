@@ -141,6 +141,8 @@ export function CallInterface() {
   const [initialScript, setInitialScript] = useState<string>('');
   const [callSummary, setCallSummary] = useState<CallSummary | null>(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
+  const [summaryTextLoading, setSummaryTextLoading] = useState(false);
+  const [structuredDataLoading, setStructuredDataLoading] = useState(false);
   const [streamingText, setStreamingText] = useState<string>('');
 
   useEffect(() => {
@@ -183,12 +185,6 @@ export function CallInterface() {
       debug.log('Audio stream started for transcription');
     });
 
-    socket.on('call_summary', (data: CallSummary) => {
-      debug.log('Call summary:', data);
-      setCallSummary(data);
-      setSummaryLoading(false);
-    });
-
     return () => {
       socket.off('transcript_update');
       socket.off('ai_suggestion_start');
@@ -196,7 +192,6 @@ export function CallInterface() {
       socket.off('ai_suggestion_end');
       socket.off('ai_suggestion');
       socket.off('twilio_stream_started');
-      socket.off('call_summary');
     };
   }, [socket]);
 
@@ -230,30 +225,117 @@ export function CallInterface() {
   const handleEndCall = useCallback(async () => {
     endCall();
 
-    if (transcript.length > 0) {
-      setSummaryLoading(true);
-      try {
-        const serverUrl = process.env.NEXT_PUBLIC_SOCKET_URL;
-        const response = await fetch(`${serverUrl}/twilio/summary`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            transcript,
-            duration: callState.duration,
-          }),
-        });
+    if (transcript.length === 0) return;
 
-        if (response.ok) {
-          const summary = await response.json();
-          setCallSummary(summary);
-        } else {
-          console.error('Failed to get summary:', await response.text());
-        }
-      } catch (error) {
-        console.error('Error fetching summary:', error);
-      } finally {
-        setSummaryLoading(false);
+    setSummaryLoading(true);
+    setSummaryTextLoading(true);
+    setStructuredDataLoading(true);
+
+    try {
+      const serverUrl = process.env.NEXT_PUBLIC_SOCKET_URL;
+      const response = await fetch(`${serverUrl}/twilio/summary`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          transcript,
+          duration: callState.duration,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to get summary');
       }
+
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error('No response body');
+      }
+
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        let currentEvent = '';
+        for (const line of lines) {
+          if (line.startsWith('event: ')) {
+            currentEvent = line.slice(7);
+          } else if (line.startsWith('data: ')) {
+            const data = line.slice(6);
+            try {
+              const parsed = JSON.parse(data);
+
+              switch (currentEvent) {
+                case 'summary_start':
+                  setSummaryLoading(false);
+                  setSummaryTextLoading(false);
+                  setCallSummary((prev) => ({
+                    duration: prev?.duration ?? callState.duration,
+                    final_motivation_level: prev?.final_motivation_level ?? 0,
+                    pain_points: prev?.pain_points ?? [],
+                    objections: prev?.objections ?? [],
+                    summary: '',
+                    next_steps: prev?.next_steps ?? '',
+                  }));
+                  break;
+
+                case 'summary_token':
+                  setCallSummary((prev) =>
+                    prev
+                      ? { ...prev, summary: prev.summary + parsed }
+                      : {
+                          duration: callState.duration,
+                          final_motivation_level: 0,
+                          pain_points: [],
+                          objections: [],
+                          summary: parsed,
+                          next_steps: '',
+                        }
+                  );
+                  break;
+
+                case 'structured_data':
+                  setStructuredDataLoading(false);
+                  setCallSummary((prev) =>
+                    prev
+                      ? { ...prev, ...parsed }
+                      : {
+                          duration: callState.duration,
+                          summary: '',
+                          ...parsed,
+                        }
+                  );
+                  break;
+
+                case 'done':
+                  setCallSummary(parsed);
+                  setSummaryLoading(false);
+                  setSummaryTextLoading(false);
+                  setStructuredDataLoading(false);
+                  break;
+
+                case 'error':
+                  console.error('SSE error:', parsed.error);
+                  break;
+              }
+            } catch {
+              // Non-JSON data, skip
+            }
+            currentEvent = '';
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching summary:', error);
+      setSummaryLoading(false);
+      setSummaryTextLoading(false);
+      setStructuredDataLoading(false);
     }
   }, [endCall, transcript, callState.duration]);
 
@@ -390,45 +472,70 @@ export function CallInterface() {
                     </div>
 
                     <div className="p-3 bg-gray-50 rounded-lg">
-                      <p className="text-sm">{callSummary.summary}</p>
+                      {summaryTextLoading ? (
+                        <div className="space-y-2">
+                          <Skeleton className="h-4 w-full" />
+                          <Skeleton className="h-4 w-3/4" />
+                        </div>
+                      ) : (
+                        <p className="text-sm">{callSummary.summary}</p>
+                      )}
                     </div>
 
-                    {callSummary.pain_points.length > 0 && (
-                      <div>
-                        <div className="text-sm font-medium mb-2">
-                          Pain Points
+                    {structuredDataLoading ? (
+                      <div className="space-y-4">
+                        <div>
+                          <Skeleton className="h-4 w-24 mb-2" />
+                          <div className="flex gap-2">
+                            <Skeleton className="h-6 w-20" />
+                            <Skeleton className="h-6 w-24" />
+                          </div>
                         </div>
-                        <div className="flex flex-wrap gap-2">
-                          {callSummary.pain_points.map((point) => (
-                            <Badge key={point} variant="secondary">
-                              {point}
-                            </Badge>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {callSummary.objections.length > 0 && (
-                      <div>
-                        <div className="text-sm font-medium mb-2">
-                          Objections
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          {callSummary.objections.map((obj) => (
-                            <Badge key={obj} variant="destructive">
-                              {obj}
-                            </Badge>
-                          ))}
+                        <div>
+                          <Skeleton className="h-4 w-20 mb-2" />
+                          <Skeleton className="h-4 w-full" />
                         </div>
                       </div>
-                    )}
+                    ) : (
+                      <>
+                        {callSummary.pain_points.length > 0 && (
+                          <div>
+                            <div className="text-sm font-medium mb-2">
+                              Pain Points
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              {callSummary.pain_points.map((point) => (
+                                <Badge key={point} variant="secondary">
+                                  {point}
+                                </Badge>
+                              ))}
+                            </div>
+                          </div>
+                        )}
 
-                    <div>
-                      <div className="text-sm font-medium mb-2">Next Steps</div>
-                      <p className="text-sm text-muted-foreground">
-                        {callSummary.next_steps}
-                      </p>
-                    </div>
+                        {callSummary.objections.length > 0 && (
+                          <div>
+                            <div className="text-sm font-medium mb-2">
+                              Objections
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              {callSummary.objections.map((obj) => (
+                                <Badge key={obj} variant="destructive">
+                                  {obj}
+                                </Badge>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        <div>
+                          <div className="text-sm font-medium mb-2">Next Steps</div>
+                          <p className="text-sm text-muted-foreground">
+                            {callSummary.next_steps}
+                          </p>
+                        </div>
+                      </>
+                    )}
                   </>
                 ) : (
                   <div className="flex items-center justify-between">

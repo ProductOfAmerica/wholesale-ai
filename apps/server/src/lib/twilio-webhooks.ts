@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { parse as parseUrl } from 'node:url';
 import type { Server as SocketIOServer } from 'socket.io';
-import { generateCallSummary } from './ai-analysis.js';
+import { streamCallSummary } from './ai-analysis.js';
 import {
   endCall,
   generateAccessToken,
@@ -158,11 +158,10 @@ async function handleSummaryRequest(
   req: IncomingMessage,
   res: ServerResponse
 ): Promise<void> {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-
   if (req.method === 'OPTIONS') {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
     res.writeHead(204);
     res.end();
     return;
@@ -179,21 +178,51 @@ async function handleSummaryRequest(
     }
 
     console.log(
-      `Generating call summary via REST (${transcript.length} entries)`
+      `Generating call summary via SSE (${transcript.length} entries)`
     );
-    const summary = await generateCallSummary(transcript, duration || 0);
 
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify(summary));
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+      'Access-Control-Allow-Origin': '*',
+    });
+
+    const summary = await streamCallSummary(transcript, duration || 0, {
+      onSummaryStart: () => {
+        res.write('event: summary_start\ndata: {}\n\n');
+      },
+      onSummaryToken: (token) => {
+        res.write(`event: summary_token\ndata: ${JSON.stringify(token)}\n\n`);
+      },
+      onSummaryEnd: () => {
+        res.write('event: summary_end\ndata: {}\n\n');
+      },
+      onStructuredData: (data) => {
+        res.write(`event: structured_data\ndata: ${JSON.stringify(data)}\n\n`);
+      },
+    });
+
+    res.write(`event: done\ndata: ${JSON.stringify(summary)}\n\n`);
+    res.end();
   } catch (error) {
     console.error('Error generating summary:', error);
-    res.writeHead(500, { 'Content-Type': 'application/json' });
-    res.end(
-      JSON.stringify({
-        error:
-          error instanceof Error ? error.message : 'Failed to generate summary',
-      })
-    );
+    if (!res.headersSent) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          error:
+            error instanceof Error
+              ? error.message
+              : 'Failed to generate summary',
+        })
+      );
+    } else {
+      res.write(
+        `event: error\ndata: ${JSON.stringify({ error: error instanceof Error ? error.message : 'Failed to generate summary' })}\n\n`
+      );
+      res.end();
+    }
   }
 }
 

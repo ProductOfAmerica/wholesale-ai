@@ -739,10 +739,22 @@ Pattern interrupt openers for next call:
 Be concise and actionable. Focus on what the caller can DO differently next time.
 </format>`;
 
+interface StreamCallSummaryCallbacks {
+  onSummaryStart: () => void;
+  onSummaryToken: (token: string) => void;
+  onSummaryEnd: () => void;
+  onStructuredData: (data: {
+    final_motivation_level: number;
+    pain_points: string[];
+    objections: string[];
+    next_steps: string;
+  }) => void;
+}
+
 export async function streamCallSummary(
   history: TranscriptEntry[],
   duration: number,
-  onToken: (token: string) => void
+  callbacks: StreamCallSummaryCallbacks
 ): Promise<CallSummary> {
   const anthropic = getClient();
 
@@ -772,6 +784,7 @@ Write a brief narrative summary of this call.`,
       ],
     });
 
+    callbacks.onSummaryStart();
     let streamedSummary = '';
     for await (const event of stream) {
       if (
@@ -780,9 +793,10 @@ Write a brief narrative summary of this call.`,
       ) {
         const token = event.delta.text;
         streamedSummary += token;
-        onToken(token);
+        callbacks.onSummaryToken(token);
       }
     }
+    callbacks.onSummaryEnd();
     return streamedSummary.trim();
   })();
 
@@ -809,7 +823,14 @@ Analyze this completed call and provide structured data using the provide_summar
     );
 
     if (toolResult?.type === 'tool_use' && 'input' in toolResult) {
-      return SummarySchema.parse(toolResult.input);
+      const data = SummarySchema.parse(toolResult.input);
+      callbacks.onStructuredData({
+        final_motivation_level: data.final_motivation_level,
+        pain_points: data.pain_points,
+        objections: data.objections,
+        next_steps: data.next_steps,
+      });
+      return data;
     }
     throw new Error('No summary result found in response');
   })();
@@ -831,7 +852,12 @@ export async function generateCallSummary(
   duration: number
 ): Promise<CallSummary> {
   try {
-    return await streamCallSummary(history, duration, () => {});
+    return await streamCallSummary(history, duration, {
+      onSummaryStart: () => {},
+      onSummaryToken: () => {},
+      onSummaryEnd: () => {},
+      onStructuredData: () => {},
+    });
   } catch (error) {
     console.error('Call Summary Error:', error);
     return {

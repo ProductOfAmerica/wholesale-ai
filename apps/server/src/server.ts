@@ -9,7 +9,7 @@ import { WebSocket, WebSocketServer } from 'ws';
 import {
   analyzeConversation,
   clearConversationContext,
-  generateCallSummary,
+  streamCallSummary,
   streamSuggestedResponse,
   updateConversationContext,
 } from './lib/ai-analysis.js';
@@ -889,7 +889,12 @@ async function handleRequestCallSummary(
   }
 
   try {
-    const summary = await generateCallSummary(history, data.duration);
+    const summary = await streamCallSummary(history, data.duration, {
+      onSummaryStart: () => socket.emit('call_summary_start'),
+      onSummaryToken: (token) => socket.emit('call_summary_token', token),
+      onSummaryEnd: () => socket.emit('call_summary_end'),
+      onStructuredData: (data) => socket.emit('call_summary_structured', data),
+    });
     socket.emit('call_summary', summary);
   } catch (error) {
     console.error('Failed to generate summary:', error);
