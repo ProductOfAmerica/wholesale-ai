@@ -600,7 +600,8 @@ export function createConversationContextManager(
       const historyToSummarize = fullHistory.slice(0, -RECENT_TURNS_LIMIT);
 
       if (historyToSummarize.length > (context.recentHistory?.length || 0)) {
-        const summary = await aiService.summarizeConversation(historyToSummarize);
+        const summary =
+          await aiService.summarizeConversation(historyToSummarize);
         if (summary) {
           this.set(socketId, {
             summary,
@@ -754,7 +755,8 @@ Summarize this real estate negotiation conversation.`,
         objection_type: null,
         suggested_response: 'Continue the conversation naturally.',
         recommended_next_move: 'Keep building rapport',
-        error: error instanceof Error ? error.message : 'Unknown error occurred',
+        error:
+          error instanceof Error ? error.message : 'Unknown error occurred',
       };
     }
   }

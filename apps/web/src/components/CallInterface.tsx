@@ -10,6 +10,11 @@ import { useCallback, useEffect, useState } from 'react';
 import { AISuggestions } from '@/components/AISuggestions';
 import { AudioLevelBars } from '@/components/AudioVisualizer';
 import { ConfigSheet } from '@/components/ConfigSheet';
+import {
+  AfterActionReport,
+  FinancialRoutingCard,
+  TCPMPrompts,
+} from '@/components/copilot';
 import { LiveTranscript } from '@/components/LiveTranscript';
 import { MotivationGauge } from '@/components/MotivationGauge';
 import { PhoneDialer } from '@/components/PhoneDialer';
@@ -17,6 +22,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
+import { useCopilotSession } from '@/hooks/useCopilotSession';
 import { useMicCapture } from '@/hooks/useMicCapture';
 import { useSocket } from '@/hooks/useSocket';
 import { type CallStatus, useTwilioCall } from '@/hooks/useTwilioCall';
@@ -26,6 +32,86 @@ function formatDuration(seconds: number): string {
   const mins = Math.floor(seconds / 60);
   const secs = seconds % 60;
   return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+}
+
+interface SummaryStreamHandlers {
+  onSummaryStart: () => void;
+  onSummaryToken: (token: string) => void;
+  onStructuredData: (data: Partial<CallSummary>) => void;
+  onDone: (summary: CallSummary) => void;
+  onError: (error: string) => void;
+}
+
+function parseSSELine(
+  line: string,
+  currentEvent: string,
+  handlers: SummaryStreamHandlers
+): string {
+  if (line.startsWith('event: ')) {
+    return line.slice(7);
+  }
+  if (line.startsWith('data: ')) {
+    const data = line.slice(6);
+    try {
+      const parsed = JSON.parse(data);
+      handleSummaryEvent(currentEvent, parsed, handlers);
+    } catch {
+      // Non-JSON data, skip
+    }
+    return '';
+  }
+  return currentEvent;
+}
+
+async function processSummaryStream(
+  response: Response,
+  handlers: SummaryStreamHandlers
+): Promise<void> {
+  const reader = response.body?.getReader();
+  if (!reader) {
+    throw new Error('No response body');
+  }
+
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+
+    let currentEvent = '';
+    for (const line of lines) {
+      currentEvent = parseSSELine(line, currentEvent, handlers);
+    }
+  }
+}
+
+function handleSummaryEvent(
+  event: string,
+  data: unknown,
+  handlers: SummaryStreamHandlers
+): void {
+  switch (event) {
+    case 'summary_start':
+      handlers.onSummaryStart();
+      break;
+    case 'summary_token':
+      handlers.onSummaryToken(data as string);
+      break;
+    case 'structured_data':
+      handlers.onStructuredData(data as Partial<CallSummary>);
+      break;
+    case 'done':
+      handlers.onDone(data as CallSummary);
+      break;
+    case 'error':
+      handlers.onError((data as { error: string }).error);
+      break;
+  }
 }
 
 function ConnectionStatus({
@@ -133,6 +219,13 @@ export function CallInterface() {
     reassociateCall,
   } = useTwilioCall(socket);
   const { audioLevel, startCapture, stopCapture } = useMicCapture();
+  const {
+    tcpmAnalysis,
+    financialRouting,
+    aar,
+    handleQuestionClick,
+    reset: resetCopilotSession,
+  } = useCopilotSession(socket);
 
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
   const [currentSuggestion, setCurrentSuggestion] =
@@ -231,6 +324,60 @@ export function CallInterface() {
     setSummaryTextLoading(true);
     setStructuredDataLoading(true);
 
+    const handlers: SummaryStreamHandlers = {
+      onSummaryStart: () => {
+        setSummaryLoading(false);
+        setSummaryTextLoading(false);
+        setCallSummary((prev) => ({
+          duration: prev?.duration ?? callState.duration,
+          final_motivation_level: prev?.final_motivation_level ?? 0,
+          pain_points: prev?.pain_points ?? [],
+          objections: prev?.objections ?? [],
+          summary: '',
+          next_steps: prev?.next_steps ?? '',
+        }));
+      },
+      onSummaryToken: (token) => {
+        setCallSummary((prev) =>
+          prev
+            ? { ...prev, summary: prev.summary + token }
+            : {
+                duration: callState.duration,
+                final_motivation_level: 0,
+                pain_points: [],
+                objections: [],
+                summary: token,
+                next_steps: '',
+              }
+        );
+      },
+      onStructuredData: (data) => {
+        setStructuredDataLoading(false);
+        setCallSummary((prev) =>
+          prev
+            ? { ...prev, ...data }
+            : {
+                duration: callState.duration,
+                final_motivation_level: 0,
+                pain_points: [],
+                objections: [],
+                summary: '',
+                next_steps: '',
+                ...data,
+              }
+        );
+      },
+      onDone: (summary) => {
+        setCallSummary(summary);
+        setSummaryLoading(false);
+        setSummaryTextLoading(false);
+        setStructuredDataLoading(false);
+      },
+      onError: (error) => {
+        console.error('SSE error:', error);
+      },
+    };
+
     try {
       const serverUrl = process.env.NEXT_PUBLIC_SOCKET_URL;
       const response = await fetch(`${serverUrl}/twilio/summary`, {
@@ -246,91 +393,7 @@ export function CallInterface() {
         throw new Error('Failed to get summary');
       }
 
-      const reader = response.body?.getReader();
-      if (!reader) {
-        throw new Error('No response body');
-      }
-
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-
-        let currentEvent = '';
-        for (const line of lines) {
-          if (line.startsWith('event: ')) {
-            currentEvent = line.slice(7);
-          } else if (line.startsWith('data: ')) {
-            const data = line.slice(6);
-            try {
-              const parsed = JSON.parse(data);
-
-              switch (currentEvent) {
-                case 'summary_start':
-                  setSummaryLoading(false);
-                  setSummaryTextLoading(false);
-                  setCallSummary((prev) => ({
-                    duration: prev?.duration ?? callState.duration,
-                    final_motivation_level: prev?.final_motivation_level ?? 0,
-                    pain_points: prev?.pain_points ?? [],
-                    objections: prev?.objections ?? [],
-                    summary: '',
-                    next_steps: prev?.next_steps ?? '',
-                  }));
-                  break;
-
-                case 'summary_token':
-                  setCallSummary((prev) =>
-                    prev
-                      ? { ...prev, summary: prev.summary + parsed }
-                      : {
-                          duration: callState.duration,
-                          final_motivation_level: 0,
-                          pain_points: [],
-                          objections: [],
-                          summary: parsed,
-                          next_steps: '',
-                        }
-                  );
-                  break;
-
-                case 'structured_data':
-                  setStructuredDataLoading(false);
-                  setCallSummary((prev) =>
-                    prev
-                      ? { ...prev, ...parsed }
-                      : {
-                          duration: callState.duration,
-                          summary: '',
-                          ...parsed,
-                        }
-                  );
-                  break;
-
-                case 'done':
-                  setCallSummary(parsed);
-                  setSummaryLoading(false);
-                  setSummaryTextLoading(false);
-                  setStructuredDataLoading(false);
-                  break;
-
-                case 'error':
-                  console.error('SSE error:', parsed.error);
-                  break;
-              }
-            } catch {
-              // Non-JSON data, skip
-            }
-            currentEvent = '';
-          }
-        }
-      }
+      await processSummaryStream(response, handlers);
     } catch (error) {
       console.error('Error fetching summary:', error);
       setSummaryLoading(false);
@@ -344,7 +407,8 @@ export function CallInterface() {
     setTranscript([]);
     setCurrentSuggestion(null);
     setCallSummary(null);
-  }, [resetCall]);
+    resetCopilotSession();
+  }, [resetCall, resetCopilotSession]);
 
   const isCallActive =
     callState.status === 'initiating' ||
@@ -529,7 +593,9 @@ export function CallInterface() {
                         )}
 
                         <div>
-                          <div className="text-sm font-medium mb-2">Next Steps</div>
+                          <div className="text-sm font-medium mb-2">
+                            Next Steps
+                          </div>
                           <p className="text-sm text-muted-foreground">
                             {callSummary.next_steps}
                           </p>
@@ -585,13 +651,23 @@ export function CallInterface() {
             </div>
           </div>
 
-          <div>
+          <div className="space-y-4">
             <AISuggestions
               suggestion={currentSuggestion}
               loading={aiLoading}
               initialScript={initialScript}
               streamingText={streamingText}
             />
+            {callState.status !== 'ended' && (
+              <>
+                <TCPMPrompts
+                  tcpmAnalysis={tcpmAnalysis}
+                  onQuestionClick={handleQuestionClick}
+                />
+                <FinancialRoutingCard routing={financialRouting} />
+              </>
+            )}
+            {callState.status === 'ended' && <AfterActionReport aar={aar} />}
           </div>
         </div>
       )}

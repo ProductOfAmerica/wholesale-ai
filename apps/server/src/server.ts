@@ -19,10 +19,10 @@ import {
   twilioToDeepgram,
 } from './lib/audio-bridge.js';
 import {
-  type TwilioConfig,
-  type TwilioService,
   createTwilioClient,
   createTwilioService,
+  type TwilioConfig,
+  type TwilioService,
 } from './lib/twilio-service.js';
 import { createTwilioRouter } from './lib/twilio-webhooks.js';
 
