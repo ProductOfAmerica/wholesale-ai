@@ -1,6 +1,6 @@
 'use client';
 
-import { zodResolver } from '@hookform/resolvers/zod';
+import { standardSchemaResolver } from '@hookform/resolvers/standard-schema';
 import type { Condition, Motivation } from '@wholesale-ai/shared';
 import { analyzeRequestSchema } from '@wholesale-ai/shared';
 import { Loader2 } from 'lucide-react';
@@ -42,7 +42,7 @@ export const PropertyForm = forwardRef<PropertyFormRef, PropertyFormProps>(
       reset,
       formState: { errors },
     } = useForm<FormValues>({
-      resolver: zodResolver(analyzeRequestSchema),
+      resolver: standardSchemaResolver(analyzeRequestSchema),
       defaultValues: {
         address: '',
         askingPrice: null,

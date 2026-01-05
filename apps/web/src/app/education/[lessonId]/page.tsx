@@ -11,7 +11,7 @@ import { LessonCategory } from '@wholesale-ai/shared';
 import { ArrowLeft, CheckCircle, Clock, Play } from 'lucide-react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { useCallback, useEffect, useState } from 'react';
+import { Suspense, useCallback, useEffect, useState } from 'react';
 import { VideoTimestamps } from '@/components/education';
 import { AppLayout } from '@/components/layout';
 import { Badge } from '@/components/ui/badge';
@@ -33,7 +33,7 @@ function formatDuration(seconds: number): string {
   return `${minutes}:${secs.toString().padStart(2, '0')}`;
 }
 
-export default function LessonDetailPage() {
+function LessonContent() {
   const params = useParams();
   const lessonId = params.lessonId as string;
 
@@ -100,34 +100,30 @@ export default function LessonDetailPage() {
 
   if (loading) {
     return (
-      <AppLayout title="Loading...">
-        <div className="flex h-64 items-center justify-center">
-          <p className="text-muted-foreground">Loading lesson...</p>
-        </div>
-      </AppLayout>
+      <div className="flex h-64 items-center justify-center">
+        <p className="text-muted-foreground">Loading lesson...</p>
+      </div>
     );
   }
 
   if (!lesson) {
     return (
-      <AppLayout title="Not Found">
-        <div className="flex h-64 flex-col items-center justify-center gap-4">
-          <p className="text-muted-foreground">Lesson not found</p>
-          <Link href="/education">
-            <Button variant="outline">
-              <ArrowLeft className="mr-2 h-4 w-4" />
-              Back to Education Hub
-            </Button>
-          </Link>
-        </div>
-      </AppLayout>
+      <div className="flex h-64 flex-col items-center justify-center gap-4">
+        <p className="text-muted-foreground">Lesson not found</p>
+        <Link href="/education">
+          <Button variant="outline">
+            <ArrowLeft className="mr-2 h-4 w-4" />
+            Back to Education Hub
+          </Button>
+        </Link>
+      </div>
     );
   }
 
   const isCompleted = progress?.completed ?? false;
 
   return (
-    <AppLayout title={lesson.title}>
+    <>
       <div className="mb-4">
         <Link
           href="/education"
@@ -206,6 +202,22 @@ export default function LessonDetailPage() {
           />
         </aside>
       </div>
+    </>
+  );
+}
+
+export default function LessonDetailPage() {
+  return (
+    <AppLayout title="Lesson">
+      <Suspense
+        fallback={
+          <div className="flex h-64 items-center justify-center">
+            <p className="text-muted-foreground">Loading lesson...</p>
+          </div>
+        }
+      >
+        <LessonContent />
+      </Suspense>
     </AppLayout>
   );
 }

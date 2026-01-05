@@ -1,6 +1,6 @@
 'use client';
 
-import { zodResolver } from '@hookform/resolvers/zod';
+import { standardSchemaResolver } from '@hookform/resolvers/standard-schema';
 import type { StrategyInputSchema } from '@wholesale-ai/shared';
 import { strategyInputSchema } from '@wholesale-ai/shared';
 import { Loader2 } from 'lucide-react';
@@ -30,7 +30,7 @@ export function ExitStrategyForm({ onSubmit, loading }: ExitStrategyFormProps) {
     watch,
     formState: { errors },
   } = useForm<StrategyInputSchema>({
-    resolver: zodResolver(strategyInputSchema),
+    resolver: standardSchemaResolver(strategyInputSchema),
     defaultValues: {
       arv: 300000,
       purchasePrice: 200000,

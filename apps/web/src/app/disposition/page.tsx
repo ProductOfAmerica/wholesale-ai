@@ -3,7 +3,7 @@
 import type { BuyerMatch } from '@wholesale-ai/shared';
 import { BadgeCheck, RefreshCw, Users } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
-import { useCallback, useEffect, useState } from 'react';
+import { Suspense, useCallback, useEffect, useState } from 'react';
 import { BuyerList, DealPackageBuilder } from '@/components/disposition';
 import { AppLayout } from '@/components/layout';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -13,7 +13,7 @@ interface MatchResponse {
   matches: BuyerMatch[];
 }
 
-export default function DispositionPage() {
+function DispositionContent() {
   const searchParams = useSearchParams();
   const dealId = searchParams.get('dealId');
 
@@ -105,63 +105,77 @@ export default function DispositionPage() {
   const verifiedCount = matches.filter((m) => m.buyer.verified).length;
 
   return (
-    <AppLayout title="Disposition Portal">
-      <div className="flex h-full gap-6">
-        <div className="flex-1">
-          <div className="mb-6 flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Users className="h-4 w-4" />
-                {matches.length} matches
-              </div>
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <BadgeCheck className="h-4 w-4 text-blue-500" />
-                {verifiedCount} verified
-              </div>
+    <div className="flex h-full gap-6">
+      <div className="flex-1">
+        <div className="mb-6 flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Users className="h-4 w-4" />
+              {matches.length} matches
             </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={fetchMatches}
-              disabled={loading}
-            >
-              <RefreshCw
-                className={`mr-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`}
-              />
-              Refresh
-            </Button>
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <BadgeCheck className="h-4 w-4 text-blue-500" />
+              {verifiedCount} verified
+            </div>
           </div>
-
-          {success && (
-            <Alert className="mb-6 border-green-200 bg-green-50">
-              <AlertDescription className="text-green-800">
-                {success}
-              </AlertDescription>
-            </Alert>
-          )}
-
-          {loading ? (
-            <div className="flex items-center justify-center py-12">
-              <RefreshCw className="h-8 w-8 animate-spin text-muted-foreground" />
-            </div>
-          ) : (
-            <BuyerList
-              matches={matches}
-              selectedIds={selectedIds}
-              onSelectionChange={handleSelectionChange}
-              onSelectAll={handleSelectAll}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={fetchMatches}
+            disabled={loading}
+          >
+            <RefreshCw
+              className={`mr-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`}
             />
-          )}
+            Refresh
+          </Button>
         </div>
 
-        <aside className="w-80 flex-shrink-0">
-          <DealPackageBuilder
-            selectedCount={selectedIds.size}
-            onSend={handleSend}
-            loading={sending}
+        {success && (
+          <Alert className="mb-6 border-green-200 bg-green-50">
+            <AlertDescription className="text-green-800">
+              {success}
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {loading ? (
+          <div className="flex items-center justify-center py-12">
+            <RefreshCw className="h-8 w-8 animate-spin text-muted-foreground" />
+          </div>
+        ) : (
+          <BuyerList
+            matches={matches}
+            selectedIds={selectedIds}
+            onSelectionChange={handleSelectionChange}
+            onSelectAll={handleSelectAll}
           />
-        </aside>
+        )}
       </div>
+
+      <aside className="w-80 flex-shrink-0">
+        <DealPackageBuilder
+          selectedCount={selectedIds.size}
+          onSend={handleSend}
+          loading={sending}
+        />
+      </aside>
+    </div>
+  );
+}
+
+export default function DispositionPage() {
+  return (
+    <AppLayout title="Disposition Portal">
+      <Suspense
+        fallback={
+          <div className="flex items-center justify-center py-12">
+            <RefreshCw className="h-8 w-8 animate-spin text-muted-foreground" />
+          </div>
+        }
+      >
+        <DispositionContent />
+      </Suspense>
     </AppLayout>
   );
 }

@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { Suspense } from 'react';
 import { cn } from '@/lib/utils';
 
 const navItems = [
@@ -24,15 +25,11 @@ const navItems = [
   { href: '/docs', label: 'Documents', icon: FileText },
 ];
 
-export function Sidebar() {
+function SidebarNav() {
   const pathname = usePathname();
 
   return (
-    <aside className="flex h-full w-64 flex-col bg-slate-900 text-white">
-      <div className="flex h-16 items-center px-6">
-        <span className="text-xl font-bold">Wholesale AI</span>
-      </div>
-
+    <>
       <nav className="flex-1 space-y-1 px-3 py-4">
         {navItems.map((item) => {
           const isActive = pathname?.startsWith(item.href);
@@ -68,6 +65,49 @@ export function Sidebar() {
           Settings
         </Link>
       </div>
+    </>
+  );
+}
+
+function SidebarNavFallback() {
+  return (
+    <>
+      <nav className="flex-1 space-y-1 px-3 py-4">
+        {navItems.map((item) => (
+          <Link
+            key={item.href}
+            href={item.href}
+            className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-slate-400 hover:bg-slate-800 hover:text-white transition-colors"
+          >
+            <item.icon className="h-5 w-5" />
+            {item.label}
+          </Link>
+        ))}
+      </nav>
+
+      <div className="border-t border-slate-800 p-3">
+        <Link
+          href="/settings"
+          className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-slate-400 hover:bg-slate-800 hover:text-white transition-colors"
+        >
+          <Settings className="h-5 w-5" />
+          Settings
+        </Link>
+      </div>
+    </>
+  );
+}
+
+export function Sidebar() {
+  return (
+    <aside className="flex h-full w-64 flex-col bg-slate-900 text-white">
+      <div className="flex h-16 items-center px-6">
+        <span className="text-xl font-bold">Wholesale AI</span>
+      </div>
+
+      <Suspense fallback={<SidebarNavFallback />}>
+        <SidebarNav />
+      </Suspense>
     </aside>
   );
 }
